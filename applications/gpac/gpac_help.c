@@ -349,7 +349,7 @@ const char *gpac_doc =
 "`$$` is an escape for $\n"
 "\n"
 "Templating can be useful when encoding several qualities in one pass.\n"
-"EX gpac -i dump.yuv:size=640x360 vcrop:wnd=0x0x320x180 c=avc:b=1M @2 c=avc:b=750k -o dump_$CropOrigin$x$Width$x$Height$.264:clone\n"
+"EX gpac -i dump.yuv:size=640x360 vcrop:wnd=0x0x320x180 c=avc:b=1M @2 c=avc:b=750k -o dump_$CropOrigin$x$Width$x$Height$.264\n"
 "This will create a cropped version of the source, encoded in AVC at 1M, and a full version of the content in AVC at 750k. "
 "Outputs will be `dump_0x0x320x180.264` for the cropped version and `dump_0x0x640x360.264` for the non-cropped one.\n"
 "# Cloning filters\n"
@@ -358,10 +358,9 @@ const char *gpac_doc =
 "EX gpac -i img.heif -o dump_$ItemID$.jpg\n"
 "In this case, only one item (likely the first declared in the file) will connect to the destination.\n"
 "Other items will not be connected since the destination only accepts one input PID.\n"
-"There is a special option `clone` allowing filters to be cloned with the same arguments. The cloned filters have the same ID as the original one.\n"
-"EX gpac -i img.heif -o dump_$ItemID$.jpg:clone\n"
+"EX gpac -i img.heif -o dump_$ItemID$.jpg\n"
 "In this case, the destination will be cloned for each item, and all will be exported to different JPEGs thanks to URL templating.\n"
-"EX gpac -i vid.mpd c=avc:FID=1:clone -o transcode.mpd:SID=1\n"
+"EX gpac -i vid.mpd c=avc:FID=1 -o transcode.mpd:SID=1\n"
 "In this case, the encoder will be cloned for each video PIDs in the source, and the destination will only use PIDs coming from the encoders.\n"
 "\n"
 "When implicit linking is enabled, all filters are by default clonable. This allows duplicating the processing for each PIDs of the same type.\n"
@@ -480,13 +479,15 @@ const char *gpac_doc =
 "- FBT: buffer time in microseconds (unsigned int value)\n"
 "- FBU: buffer units (unsigned int value)\n"
 "- FBD: decode buffer time in microseconds (unsigned int value)\n"
-"- clone: filter cloning flag (no value)\n"
+"- clone: explicitly enable/disable filter cloning flag (no value)\n"
 "- nomux: enable/disable direct file copy (no value)\n"
 "- gfreg: preferred filter registry names for link solving (string value)\n"
 "- gfloc: following options are local to filter declaration, not inherited (no value)\n"
 "- gfopt: following options are not tracked (no value)\n"
 "- gpac: argument separator for URLs (no value)\n"
 "- ccp: filter replacement control (string list value)\n"
+"- NCID: ID of netcap configuration to use (string)\n"
+"- DBG: debug missing input PID property (`=pid`), missing input packet property (`=pck`) or both (`=all`)\n"
 "\n"
 "The buffer control options are used to change the default buffering of PIDs of a filter:\n"
 "- `FBT` controls the maximum buffer time of output PIDs of a filter\n"
@@ -495,7 +496,7 @@ const char *gpac_doc =
 "\n"
 "If another filter sends a buffer requirement messages, the maximum value of `FBT` (resp. `FBD`) and the user requested buffer time will be used for output buffer time (resp. decoding buffer time).\n"
 "\n"
-"These options can be set:\n"
+"The options `FBT`, `FBU`, `FBD`  and `DBG` can be set:\n"
 "- per filter instance: `fA reframer:FBU=2`\n"
 "- per filter class for the run: `--reframer@FBU=2`\n"
 "- in the GPAC config file in a per-filter section: `[filter@reframer]FBU=2`\n"
@@ -958,7 +959,7 @@ static const char *gpac_credentials =
 "- `reset`: deletes the `users.cfg` file (i.e. deletes all users and groups)\n"
 "- `NAME`: show information of user `NAME`\n"
 "- `+NAME`: adds user `NAME`\n"
-"- `+NAME:I1=V1[,I2=V2]`: sets info `I1` with value `V1` to user `NAME`. the info name `password` resets password without prompt.\n"
+"- `+NAME:I1=V1[,I2=V2]`: sets info `I1` with value `V1` to user `NAME`. The info name `password` resets password without prompt.\n"
 "- `-NAME`: removes user `NAME`\n"
 "- `_NAME`: force password change of user `NAME`\n"
 "- `@NAME`: show information of group `NAME`\n"
@@ -1124,12 +1125,13 @@ void gpac_suggest_arg(char *aname)
 	}
 }
 
-void gpac_suggest_filter(char *fname, Bool is_help, Bool filter_only)
+Bool gpac_suggest_filter(char *fname, Bool is_help, Bool filter_only)
 {
 	Bool found = GF_FALSE;
+	Bool exact_match = GF_FALSE;
 	Bool first = GF_FALSE;
 	u32 i, count, pass_exact = GF_TRUE;
-	if (!fname) return;
+	if (!fname) return GF_FALSE;
 
 	if (filter_only || !is_help) pass_exact = GF_FALSE;
 
@@ -1189,6 +1191,7 @@ redo_pass:
 						if (!doc) doc = "Not documented";
 						GF_LOG(GF_LOG_INFO, GF_LOG_APP, ("%s: %s\n", alias, doc));
 						found = GF_TRUE;
+						if (is_help) return GF_TRUE;
 					}
 				}
 				else if (gf_sys_word_match(fname, alias)) {
@@ -1212,15 +1215,21 @@ redo_pass:
 				i++;
 
 				if (gf_sys_word_match(fname, arg->name)) {
-					if (!first) {
+					if (!strcmp(fname, arg->name)) {
+						gf_sys_format_help(helpout, help_flags | GF_PRINTARG_HIGHLIGHT_FIRST, "-%s: %s\n", arg->name, arg->description);
 						first = GF_TRUE;
-						if (!found) {
-							GF_LOG(GF_LOG_ERROR, GF_LOG_APP, ("No such filter %s\n", fname));
-							found = GF_TRUE;
+						exact_match = GF_TRUE;
+					} else {
+						if (!first) {
+							first = GF_TRUE;
+							if (!found) {
+								GF_LOG(GF_LOG_ERROR, GF_LOG_APP, ("No such filter %s\n", fname));
+								found = GF_TRUE;
+							}
+							GF_LOG(GF_LOG_WARNING, GF_LOG_APP, ("\nClosest core option: \n"));
 						}
-						GF_LOG(GF_LOG_WARNING, GF_LOG_APP, ("\nClosest core option: \n"));
+						GF_LOG(GF_LOG_INFO, GF_LOG_APP, ("-%s: %s\n", arg->name, arg->description));
 					}
-					GF_LOG(GF_LOG_INFO, GF_LOG_APP, ("-%s: %s\n", arg->name, arg->description));
 				}
 			}
 
@@ -1237,8 +1246,9 @@ redo_pass:
 
 					if (pass_exact) {
 						if (!strcmp(fname, arg->arg_name)) {
-							gf_sys_format_help(helpout, help_flags | GF_PRINTARG_HIGHLIGHT_FIRST, "%s.%s %s\n", reg->name, arg->arg_name, arg->arg_desc);
+							gf_sys_format_help(helpout, help_flags | GF_PRINTARG_HIGHLIGHT_FIRST, "%s.%s: %s\n", reg->name, arg->arg_name, arg->arg_desc);
 							found = GF_TRUE;
+							exact_match = GF_TRUE;
 						}
 						continue;
 					}
@@ -1284,6 +1294,7 @@ redo_pass:
 
 		}
 	}
+	if (exact_match) return GF_TRUE;
 	if (!found) {
 		if (pass_exact) {
 			pass_exact = GF_FALSE;
@@ -1295,6 +1306,7 @@ redo_pass:
 			is_help ? ", gpac -h or search all help using gpac -hx" : ""
 		));
 	}
+	return GF_FALSE;
 }
 
 static void gpac_suggest_filter_arg(GF_Config *opts, const char *argname, u32 atype)
@@ -2168,7 +2180,8 @@ Bool print_filters(int argc, char **argv, GF_SysArgMode argmode)
 
 	if (found) return GF_TRUE;
 
-	gpac_suggest_filter(fname, GF_TRUE, GF_FALSE);
+	if (gpac_suggest_filter(fname, GF_TRUE, GF_FALSE))
+		return GF_TRUE;
 	return GF_FALSE;
 }
 
@@ -2186,7 +2199,7 @@ void dump_all_props(char *pname)
 
 		gf_sys_format_help(helpout, help_flags, "Name | Description  \n");
 		gf_sys_format_help(helpout, help_flags, "--- | ---  \n");
-		for (i=GF_PROP_FORBIDEN+1; i<GF_PROP_LAST_DEFINED; i++) {
+		for (i=GF_PROP_FORBIDDEN+1; i<GF_PROP_LAST_DEFINED; i++) {
 			if (i==GF_PROP_STRING_NO_COPY) continue;
 			if (i==GF_PROP_DATA_NO_COPY) continue;
 			if (i==GF_PROP_STRING_LIST_COPY) continue;
@@ -2206,7 +2219,7 @@ void dump_all_props(char *pname)
 		gf_sys_format_help(helpout, help_flags, "Built-in properties matching `%s` for PIDs and packets listed as `Name (4CC type FLAGS): description`\n`FLAGS` can be D (droppable - see GSF multiplexer filter help), P (packet property)\n", pname);
 	} else {
 		gf_sys_format_help(helpout, help_flags, "Built-in property types\n");
-		for (i=GF_PROP_FORBIDEN+1; i<GF_PROP_LAST_DEFINED; i++) {
+		for (i=GF_PROP_FORBIDDEN+1; i<GF_PROP_LAST_DEFINED; i++) {
 			if (i==GF_PROP_STRING_NO_COPY) continue;
 			if (i==GF_PROP_DATA_NO_COPY) continue;
 			if (i==GF_PROP_STRING_LIST_COPY) continue;
@@ -3443,7 +3456,7 @@ Bool gpac_expand_alias(int o_argc, char **o_argv)
 		argv[a_idx] = o_argv[i];
 		a_idx++;
 	}
-	assert(argc==a_idx);
+	gf_assert(argc==a_idx);
 
 	for (i=0; i< (u32) argc; i++) {
 		char *arg = argv[i];

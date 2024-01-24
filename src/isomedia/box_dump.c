@@ -1595,9 +1595,7 @@ static GF_Err dump_uncc(GF_UnknownBox *u, FILE * trace)
 }
 
 static char *ctyp_names[] = {"Monochrome", "Y", "U/Cb", "V/Cr", "Red", "Green", "Blue", "Alpha", "Depth", "Disparity", "Palette", "FilterArray",
-	"padded", "Gamma", "X-ray", "VUV", "UVC", "UVB", "UVA", "NIR", "SWIR", "MWIR", "LWIR", "Panchromatic",
-	"SAR complex", "SAR magnitude", "SAR phase",
-	"ISAR complex", "ISAR magnitude", "ISAR phase"};
+	"padded", "Cyan", "Magenta", "Yellow", "KeyBlack"};
 
 static const char *get_comp_type_name(u32 ctype)
 {
@@ -5953,7 +5951,7 @@ GF_Err senc_box_dump(GF_Box *a, FILE * trace)
 			}
 		}
 		if (use_multikey || ((ptr->flags & 0x2) && (sai->cenc_data_size>iv_size)) ) {
-			u32 j, nb_subs;
+			u32 j, nb_subs, total_bytes=0;
 
 			nb_subs = gf_bs_read_int(bs, subs_bits);
 			gf_fprintf(trace, " SubsampleCount=\"%u\"", nb_subs);
@@ -5969,7 +5967,10 @@ GF_Err senc_box_dump(GF_Box *a, FILE * trace)
 				clear = gf_bs_read_u16(bs);
 				crypt = gf_bs_read_u32(bs);
 				gf_fprintf(trace, " NumClearBytes=\"%u\" NumEncryptedBytes=\"%u\"/>\n", clear, crypt);
+				total_bytes+=clear+crypt;
 			}
+			if (!gf_sys_is_test_mode())
+				gf_fprintf(trace, "<!-- counted %u bytes for entry -->\n", total_bytes);
 		} else {
 			gf_fprintf(trace, ">\n");
 		}
@@ -6799,6 +6800,55 @@ GF_Err dfla_box_dump(GF_Box *a, FILE * trace)
 	return GF_OK;
 }
 
+GF_Err ddts_box_dump(GF_Box *a, FILE * trace)
+{
+	GF_DTSSpecificBox *ptr = (GF_DTSSpecificBox *)a;
+
+	gf_isom_box_dump_start(a, "DTSpecificBox", trace);
+	gf_fprintf(trace, "SamplingFrequency=\"%d\" MaxBitrate=\"%d\" AvgBitrate=\"%d\" "
+		"SampleDepth=\"%d\" FrameDuration=\"%d\" StreamConstruction=\"%d\" "
+		"CoreLFEPresent=\"%d\" CoreLayout=\"%d\" CoreSize=\"%d\" StereoDownmix=\"%d\" "
+		"RepresentationType=\"%d\" ChannelLayout=\"%d\" MultiAssetFlag=\"%d\" "
+		"LBRDurationMod=\"%d\"",
+		ptr->cfg.SamplingFrequency, ptr->cfg.MaxBitrate, ptr->cfg.AvgBitrate,
+		ptr->cfg.SampleDepth, ptr->cfg.FrameDuration, ptr->cfg.StreamConstruction,
+		ptr->cfg.CoreLFEPresent, ptr->cfg.CoreLayout, ptr->cfg.CoreSize,
+		ptr->cfg.StereoDownmix, ptr->cfg.RepresentationType, ptr->cfg.ChannelLayout,
+		ptr->cfg.MultiAssetFlag, ptr->cfg.LBRDurationMod);
+	gf_isom_box_dump_done("DTSSpecificBox", a, trace);
+	return GF_OK;
+}
+
+GF_Err udts_box_dump(GF_Box *a, FILE * trace)
+{
+	GF_UDTSSpecificBox *ptr = (GF_UDTSSpecificBox *)a;
+	u32 byte;
+	u8 i;
+	u8 *data;
+	gf_isom_box_dump_start(a, "UDTSpecificBox", trace);
+	gf_fprintf(trace,
+		"DecoderProfileCode=\"%d\" FrameDurationCode=\"%d\" MaxPayloadCode=\"%d\" "
+		"NumPresentationsCode=\"%d\" ChannelMask=\"%d\" BaseSamplingFrequencyCode=\"%d\" "
+		"SampleRateMod=\"%d\" RepresentationType=\"%d\" StreamIndex=\"%d\" "
+		"ExpansionBoxPresent=\"%d\"",
+		ptr->cfg.DecoderProfileCode, ptr->cfg.FrameDurationCode, ptr->cfg.MaxPayloadCode,
+		ptr->cfg.NumPresentationsCode, ptr->cfg.ChannelMask,
+		ptr->cfg.BaseSamplingFrequencyCode, ptr->cfg.SampleRateMod,
+		ptr->cfg.RepresentationType, ptr->cfg.StreamIndex, ptr->cfg.ExpansionBoxPresent);
+	if ((ptr->cfg.NumPresentationsCode + 1) * 16 < ptr->cfg.PresentationIDTagDataSize) {
+		data = ptr->cfg.PresentationIDTagData;
+		for (i=0; i<=ptr->cfg.NumPresentationsCode; i++) {
+			if (ptr->cfg.IDTagPresent[i]) {
+				gf_fprintf(trace, " PresentationIDTag%d=\"", i + 1);
+				for (byte=0; byte<16; byte++)
+					gf_fprintf(trace, "%02X", *data++);
+				gf_fprintf(trace, "\"");
+			}
+		}
+	}
+	gf_isom_box_dump_done("UDTSSpecificBox", a, trace);
+	return GF_OK;
+}
 
 GF_Err mvcg_box_dump(GF_Box *a, FILE * trace)
 {

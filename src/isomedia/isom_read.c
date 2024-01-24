@@ -553,37 +553,7 @@ GF_ISOFile *gf_isom_open(const char *fileName, GF_ISOOpenMode OpenMode, const ch
 	return (GF_ISOFile *) movie;
 }
 
-
-#if 0
-/*! gets access to the data bitstream  - see \ref gf_isom_open
-\param isom_file the target ISO file
-\param out_bs set to the file input bitstream - do NOT destroy
-\return error if any
-*/
-GF_Err gf_isom_get_bs(GF_ISOFile *movie, GF_BitStream **out_bs)
-{
-#ifndef GPAC_DISABLE_ISOM_WRITE
-	if (!movie || movie->openMode != GF_ISOM_OPEN_WRITE || !movie->editFileMap) //memory mode
-		return GF_NOT_SUPPORTED;
-
-	if (movie->segment_bs)
-		*out_bs = movie->segment_bs;
-	else
-		*out_bs = movie->editFileMap->bs;
-
-	if (movie->moof)
-		movie->moof->fragment_offset = 0;
-
-	return GF_OK;
-#else
-	return GF_NOT_SUPPORTED;
-#endif
-}
-#endif
-
-
-GF_EXPORT
-GF_Err gf_isom_write(GF_ISOFile *movie)
+static GF_Err gf_isom_write(GF_ISOFile *movie)
 {
 	GF_Err e;
 	if (movie == NULL) return GF_ISOM_INVALID_FILE;
@@ -1106,7 +1076,7 @@ u64 gf_isom_get_track_duration(GF_ISOFile *movie, u32 trackNumber)
 #ifndef GPAC_DISABLE_ISOM_WRITE
 	/*in all modes except dump recompute duration in case headers are wrong*/
 	if (movie->openMode != GF_ISOM_OPEN_READ_DUMP) {
-		SetTrackDuration(trak);
+		SetTrackDurationEx(trak, GF_TRUE);
 	}
 #endif
 	return trak->Header->duration;
@@ -2804,7 +2774,7 @@ GF_Err gf_isom_get_user_data(GF_ISOFile *movie, u32 trackNumber, u32 UserDataTyp
 
 	i=0;
 	while ((map = (GF_UserDataMap*)gf_list_enum(udta->recordList, &i))) {
-		if ((map->boxType == GF_ISOM_BOX_TYPE_UUID) && !memcmp(map->uuid, UUID, 16)) goto found;
+		if ((map->boxType == GF_ISOM_BOX_TYPE_UUID) && UUID && !memcmp(map->uuid, UUID, 16)) goto found;
 		else if (map->boxType == UserDataType) goto found;
 
 	}
@@ -5656,7 +5626,7 @@ exit:
 				senc->piff_type = 2;
 				senc->IV_size = 8;
 			}
-			assert(senc->IV_size);
+			gf_assert(senc->IV_size);
 			if (IsEncrypted) *IsEncrypted = GF_TRUE;
 			if (key_info_size) *key_info_size = senc->IV_size;
 		}
@@ -6246,7 +6216,7 @@ GF_Err gf_isom_get_chunk_info(GF_ISOFile *movie, u32 trackNumber, u32 chunk_num,
 				*sample_per_chunk = stsc->entries[i].samplesPerChunk;
 			break;
 		}
-		assert(stsc->entries[i].firstChunk<chunk_num);
+		if (stsc->entries[i].firstChunk>=chunk_num) return GF_ISOM_INVALID_FILE;
 
 		if ((i+1 == stsc->nb_entries)
 			|| (stsc->entries[i+1].firstChunk>chunk_num)
@@ -6258,7 +6228,7 @@ GF_Err gf_isom_get_chunk_info(GF_ISOFile *movie, u32 trackNumber, u32 chunk_num,
 				*sample_per_chunk = stsc->entries[i].samplesPerChunk;
 			break;
 		}
-		assert(stsc->entries[i+1].firstChunk > stsc->entries[i].firstChunk);
+		if (stsc->entries[i+1].firstChunk <= stsc->entries[i].firstChunk) return GF_ISOM_INVALID_FILE;
 
 		nb_chunks_before = stsc->entries[i+1].firstChunk - stsc->entries[i].firstChunk;
 		nb_samples += stsc->entries[i].samplesPerChunk * nb_chunks_before;

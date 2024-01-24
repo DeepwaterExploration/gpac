@@ -478,7 +478,6 @@ static void ghi_dmx_declare_opid_bin(GF_Filter *filter, GHIDmxCtx *ctx, GHIStrea
 {
 	u32 i;
 	if (!gf_list_count(st->opids)) {
-		u32 i;
 		for (i=0; i<st->mux_dst.nb_items; i++) {
 			GF_FilterPid *opid = gf_filter_pid_new(filter);
 			gf_filter_pid_set_udta(opid, st);
@@ -1001,8 +1000,18 @@ GF_Err ghi_dmx_init(GF_Filter *filter, GHIDmxCtx *ctx)
 		bs = gf_bs_new(data, size, GF_BITSTREAM_READ);
 		e = ghi_dmx_init_bin(filter, ctx, bs);
 		if (!e && gf_bs_is_overflow(bs)) e = GF_NON_COMPLIANT_BITSTREAM;
+	} else if (gf_utf8_is_legal(data, size)) {
+		char *str = gf_malloc(size+1);
+		if (str) {
+			memcpy(str, data, size);
+			str[size]=0;
+			e = ghi_dmx_init_xml(filter, ctx, str);
+			gf_free(str);
+		} else {
+			e = GF_OUT_OF_MEM;
+		}
 	} else {
-		e = ghi_dmx_init_xml(filter, ctx, data);
+		e = GF_NON_COMPLIANT_BITSTREAM;
 	}
 	if (e) {
 		if (bs) gf_bs_del(bs);

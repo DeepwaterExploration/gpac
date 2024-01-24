@@ -210,14 +210,14 @@ enum {
 	GF_NETIF_RECV_ONLY = 1<<2,
 	/*! set if interface is loopback*/
 	GF_NETIF_LOOPBACK = 1<<3,
-	/*! set if IP adress is IPv6*/
+	/*! set if IP address is IPv6*/
 	GF_NETIF_IPV6 = 1<<4,
 };
 /*!  network interface enumeration callback
 \param cbk user data passed to \ref gf_net_enum_interfaces
 \param name interface name
-\param IP interface IP adress string, may be NULL
-\param flags flags for interface and adress
+\param IP interface IP address string, may be NULL
+\param flags flags for interface and address
 \return true to cancel enumeration
 */
 typedef Bool (*gf_net_ifce_enum)(void *cbk, const char *name, const char *IP, u32 flags);
@@ -408,6 +408,17 @@ Constructs a socket object
 \return the socket object or NULL if network initialization failure
  */
 GF_Socket *gf_sk_new(u32 SocketType);
+
+/*!
+\brief socket constructor
+
+Constructs a socket object with a specific netcap configuration ID
+\param SocketType the socket type to create, either UDP or TCP
+\param netcap_id ID of netcap configuration to use, may be null (see gpac -h netcap)
+\return the socket object or NULL if network initialization failure
+ */
+GF_Socket *gf_sk_new_ex(u32 SocketType, const char *netcap_id);
+
 /*!
 \brief socket destructor
 
@@ -715,7 +726,7 @@ Performs a select (wait) on the socket group
 \param sg socket group object
 \param wait_usec microseconds to wait (must be less than one second)
 \param mode the operation mode desired
-\return error if any
+\return error if any - if using a capture file and the capture is done, returns GF_IP_CONNECTION_CLOSED if TCP sockets are present, otherwise GF_EOS
  */
 GF_Err gf_sk_group_select(GF_SockGroup *sg, u32 wait_usec, GF_SockSelectMode mode);
 

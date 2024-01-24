@@ -100,7 +100,7 @@ typedef enum
 	GF_NETIO_SESSION_NOTIFY_DATA = 1<<2,
 	/*indicates that the connection to the server should be kept once the download is successfully completed*/
 	GF_NETIO_SESSION_PERSISTENT = 1<<3,
-	/*file is stored in memory, and the cache name is set to gmem://%p, where %p is the blob object adress.
+	/*file is stored in memory, and the cache name is set to gmem://%p, where %p is the blob object address.
 	Memory cached files are destroyed upon downloader destruction*/
 	GF_NETIO_SESSION_MEMORY_CACHE = 1<<4,
 	/*! do not delete files after download*/
@@ -470,6 +470,14 @@ Retrieves the HTTP header name and value for the given header index.
 GF_Err gf_dm_sess_enum_headers(GF_DownloadSession *sess, u32 *idx, const char **hdr_name, const char **hdr_val);
 
 /*!
+\brief set netcap rule ID
+
+Sets ID of netcap rules for this session
+\param sess the current session
+\param netcap_id ID of netcap configuration to use, may be null (see gpac -h netcap)
+ */
+void gf_dm_sess_set_netcap_id(GF_DownloadSession *sess, const char *netcap_id);
+/*!
 \brief sets download manager max rate per session
 
 Sets the maximum rate (per session only at the current time).
@@ -658,6 +666,7 @@ u32 gf_dm_get_global_rate(GF_DownloadManager *dm);
 void gf_dm_set_data_rate(GF_DownloadManager *dm, u32 rate_in_bits_per_sec);
 GF_DownloadManager *gf_dm_new(GF_DownloadFilterSession *fsess);
 void gf_dm_del(GF_DownloadManager *dm);
+void gf_dm_sess_set_netcap_id(GF_DownloadSession *sess, const char *netcap_id);
 
 
 #endif //GPAC_CONFIG_EMSCRIPTEN

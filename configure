@@ -121,7 +121,7 @@ is_emcfg="no"
 has_remotery="yes"
 em_type="js"
 em_size="0"
-
+fatal_assert="no"
 
 #flags not set by generic lib config
 has_x11="no"
@@ -244,6 +244,7 @@ push_feature "doc" "Embedded documentation"
 push_feature "evg" "EVG (GPAC vector graphics tools)"
 push_feature "avdevice" "avdevice support in FFMPEG"
 push_feature "avfilter" "avfilter support in FFMPEG"
+push_feature "net-cap" "network grab and replay support"
 
 push_feature "compositor" "*Compositor"
 push_feature "vout" "*video output"
@@ -380,6 +381,7 @@ GPAC build options:
   --enable-gprof           enable profiling
   --enable-gcov            enable coverage
   --enable-pic             enable Position Independant Code for shared objects
+  --fatal-assert           make any call to assert abort program
   --strip                  enable strip
   --std-allocator          uses standard lib memory allocator
   --enable-sanitizer       enable address sanitizer
@@ -634,6 +636,8 @@ for opt do
         --enable-afl) cc_orig="afl-gcc"; cxx_orig="afl-g++"
             ;;
         --enable-afl-clang) cc_orig="afl-clang"; cxx_orig="afl-clang++"
+            ;;
+        --fatal-assert) fatal_assert="yes";
             ;;
         --verbose) verbose="yes";
             ;;
@@ -2446,6 +2450,12 @@ if test "$disable_restrict" = "no" ; then
     echo "#define GPAC_ENABLE_RESTRICT" >> $TMPH
 fi
 
+if test "$disable_net_cap" = "yes" ; then
+    echo "Network record/playback disabled"
+    echo "#define GPAC_DISABLE_NETCAP" >> $TMPH
+fi
+
+
 echo ""
 
 echo "** Detected libraries **"
@@ -2509,7 +2519,7 @@ fi
 if [ -z $ffopts ] ; then
 echo "FFMPEG: $has_ffmpeg"
 else
-echo "FFMPEG: $has_ffmpeg - "$ffopts"supported"
+echo "FFMPEG: $has_ffmpeg - \"$ffopts\" supported"
 fi
 
 
@@ -2739,6 +2749,11 @@ echo "#define GPAC_DISABLE_QJS_LIBC" >> $TMPH
 fi
 
 fi
+
+if test "$fatal_assert" = "yes" ; then
+echo "#define GPAC_ASSERT_FATAL" >> $TMPH
+fi
+
 
 echo "HAS_OPENSSL=$has_ssl" >> config.mak
 if test "$has_ssl" != "no" ; then
@@ -3183,7 +3198,7 @@ generate_pkgconfig () {
 	echo ""
 	echo "Name: gpac"
 	echo "Description: GPAC Multimedia Framework"
-	echo "URL: http://gpac.io"
+	echo "URL: https://gpac.io"
 	echo "Version:$version"
 	echo "Cflags: -I\${prefix}/include"
 	echo "Libs: -L\${libdir} -lgpac"

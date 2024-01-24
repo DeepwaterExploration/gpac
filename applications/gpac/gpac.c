@@ -1098,7 +1098,7 @@ restart:
 		}
 
 		if (print_filters(argc, argv, argmode)==GF_FALSE)
-			e = GF_FILTER_NOT_FOUND;
+			e = GF_NOT_FOUND;
 		ERR_EXIT
 	}
 	if (view_filter_conn) {
@@ -1425,7 +1425,8 @@ exit:
 
 	{
 		if (e) {
-			fprintf(stderr, "session error %s\n", gf_error_to_string(e) );
+			if (e!=GF_NOT_FOUND)
+				fprintf(stderr, "session error: %s\n", gf_error_to_string(e) );
 		} else {
 			e = gf_fs_get_last_connect_error(session);
 			if (e<0) fprintf(stderr, "session last connect error %s\n", gf_error_to_string(e) );
@@ -2943,8 +2944,8 @@ static u32 gpac_unit_tests(GF_MemTrackerType mem_track)
 	gpac_suggest_arg("blcksize");
 	gpac_suggest_filter("outf", GF_FALSE, GF_FALSE);
 	//todo: build tests for these two
-	gf_filter_pid_negociate_property_str(NULL, NULL, NULL);
-	gf_filter_pid_negociate_property_dyn(NULL, NULL, NULL);
+	gf_filter_pid_negotiate_property_str(NULL, NULL, NULL);
+	gf_filter_pid_negotiate_property_dyn(NULL, NULL, NULL);
 
 	gf_props_parse_type("uint");
 	//this one is just a wrapper around an internal function

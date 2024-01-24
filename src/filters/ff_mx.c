@@ -125,9 +125,10 @@ static GF_Err ffmx_init_mux(GF_Filter *filter, GF_FFMuxCtx *ctx)
 	u32 min_timescale=1000;
 	int res;
 
-	assert(ctx->status==FFMX_STATE_AVIO_OPEN);
+	gf_assert(ctx->status==FFMX_STATE_AVIO_OPEN);
 
 	ctx->status = FFMX_STATE_HDR_DONE;
+	ctx->probe_init = 0;
 
 	AVDictionary *options = NULL;
 	av_dict_copy(&options, ctx->options, 0);
@@ -1367,10 +1368,16 @@ static GF_Err ffmx_configure_pid(GF_Filter *filter, GF_FilterPid *pid, Bool is_r
 #endif
 
 	p = gf_filter_pid_get_property(pid, GF_PROP_PID_DASH_MODE);
-	if (p && (p->value.uint==1)) {
-		ctx->dash_mode = GF_TRUE;
+	if (p) {
+		if (p->value.uint==2) {
+			GF_LOG(GF_LOG_ERROR, GF_LOG_CONTAINER, ("[FFMux] DASH/M3U8 muxing in single file is not supported\n"));
+			return GF_NOT_SUPPORTED;
+		}
+		if (p->value.uint==1) {
+			ctx->dash_mode = GF_TRUE;
+			ctx->ileave.num = 0;
+		}
 	}
-
 
 	gf_filter_pid_set_framing_mode(pid, GF_TRUE);
 	return GF_OK;
@@ -1458,7 +1465,7 @@ static const GF_FilterCapability FFMuxCaps[] =
 	CAP_UINT(GF_CAPS_INPUT, GF_PROP_PID_CODECID, GF_CODECID_SIMPLE_TEXT),
 	CAP_UINT(GF_CAPS_INPUT, GF_PROP_PID_CODECID, GF_CODECID_SUBS_TEXT),
 	{0},
-	//these  ones are framed (DVB subs, simple text)
+	//these ones are framed (DVB subs, simple text)
 	CAP_UINT(GF_CAPS_INPUT, GF_PROP_PID_STREAM_TYPE, GF_STREAM_TEXT),
 	CAP_BOOL(GF_CAPS_INPUT_EXCLUDED, GF_PROP_PID_UNFRAMED, GF_TRUE),
 	CAP_UINT(GF_CAPS_INPUT, GF_PROP_PID_CODECID, GF_CODECID_SIMPLE_TEXT),

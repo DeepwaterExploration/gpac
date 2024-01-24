@@ -186,7 +186,7 @@ static GF_Err sockout_initialize(GF_Filter *filter)
 	url = strchr(ctx->dst, ':');
 	url += 3;
 
-	ctx->socket = gf_sk_new(sock_type);
+	ctx->socket = gf_sk_new_ex(sock_type, gf_filter_get_netcap_id(filter));
 	if (! ctx->socket ) {
 		GF_LOG(GF_LOG_ERROR, GF_LOG_NETWORK, ("[SockOut] Failed to open socket for %s\n", ctx->dst));
 		return GF_IO_ERR;
@@ -497,6 +497,10 @@ static GF_Err sockout_process(GF_Filter *filter)
 		if (ctx->pck_pending) return GF_OK;
 
 	} else {
+		if (gf_sk_select(ctx->socket, GF_SK_SELECT_WRITE)==GF_IP_NETWORK_EMPTY) {
+			gf_filter_ask_rt_reschedule(filter, 1000);
+			return GF_OK;
+		}
 		e = sockout_send_packet(ctx, pck, ctx->socket);
 		if (e == GF_BUFFER_TOO_SMALL) return GF_OK;
 		if (e==GF_IP_CONNECTION_CLOSED) {

@@ -147,7 +147,7 @@ static Bool nhmldmx_process_event(GF_Filter *filter, const GF_FilterEvent *evt)
 		//post a seek
 		ctx->in_seek = GF_TRUE;
 
-		//lcoate previous RAP sample
+		//locate previous RAP sample
 		while ((node = (GF_XMLNode *) gf_list_enum(ctx->root->content, &i))) {
 			u32 j=0;
 			u64 dts=0;
@@ -492,7 +492,7 @@ static GF_Err nhml_sample_from_xml(GF_NHMLDmxCtx *ctx, char *xml_file, char *xml
 		goto exit;
 	}
 
-	assert(breaker.to_pos > breaker.from_pos);
+	gf_assert(breaker.to_pos > breaker.from_pos);
 
 
 	ctx->samp_buffer_size = (u32) (breaker.to_pos - breaker.from_pos);
@@ -1087,7 +1087,8 @@ static GF_Err nhmldmx_init_parsing(GF_Filter *filter, GF_NHMLDmxCtx *ctx)
 		return GF_NON_COMPLIANT_BITSTREAM;
 	}
 
-	nhmldmx_config_output(filter, ctx, ctx->root);
+	e = nhmldmx_config_output(filter, ctx, ctx->root);
+	if (e) return e;
 
 	ctx->media_done = 0;
 	ctx->current_child_idx = 0;
@@ -1543,7 +1544,7 @@ static GF_Err nhmldmx_send_sample(GF_Filter *filter, GF_NHMLDmxCtx *ctx)
 			//use full file only if no subbs
 			if (!ctx->samp_buffer_size && !has_subbs && f) {
 				u64 ssize = gf_fsize(f);
-				assert(ssize < 0x80000000);
+				gf_fatal_assert(ssize < 0x80000000);
 				ctx->samp_buffer_size = (u32) ssize;
 			}
 
@@ -1700,7 +1701,7 @@ GF_Err nhmldmx_process(GF_Filter *filter)
 	if (pck) {
 		gf_filter_pck_get_framing(pck, &start, &end);
 		//for now we only work with complete files
-		assert(end);
+		gf_assert(end);
 	}
 
 

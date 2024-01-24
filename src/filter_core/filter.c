@@ -291,7 +291,7 @@ GF_Filter *gf_filter_new(GF_FilterSession *fsess, const GF_FilterRegister *freg,
 	GF_Filter *filter;
 	GF_Err e;
 	u32 i;
-	assert(fsess);
+	if (!fsess) return NULL;
 
 	GF_SAFEALLOC(filter, GF_Filter);
 	if (!filter) {
@@ -596,12 +596,10 @@ void task_del(void *_task)
 
 void gf_filter_del(GF_Filter *filter)
 {
+	gf_assert(filter);
 	GF_LOG(GF_LOG_DEBUG, GF_LOG_FILTER, ("Filter %s destruction\n", filter->name));
-	assert(filter);
-//	assert(!filter->detached_pid_inst);
-	assert(!filter->detach_pid_tasks_pending);
-//	assert(!filter->swap_pidinst_dst);
-	assert(!filter->swap_pidinst_src);
+	gf_assert(!filter->detach_pid_tasks_pending);
+	gf_assert(!filter->swap_pidinst_src);
 
 
 #ifdef GPAC_HAS_QJS
@@ -724,6 +722,9 @@ void gf_filter_del(GF_Filter *filter)
 	if (filter->meta_instances)
 		gf_free(filter->meta_instances);
 
+	if (filter->netcap_id)
+		gf_free(filter->netcap_id);
+
 #ifdef GPAC_HAS_QJS
 	if (filter->iname)
 		gf_free(filter->iname);
@@ -756,7 +757,7 @@ void gf_filter_del(GF_Filter *filter)
 GF_EXPORT
 void *gf_filter_get_udta(GF_Filter *filter)
 {
-	assert(filter);
+	gf_assert(filter);
 
 	return filter->filter_udta;
 }
@@ -764,7 +765,7 @@ void *gf_filter_get_udta(GF_Filter *filter)
 GF_EXPORT
 const char * gf_filter_get_name(GF_Filter *filter)
 {
-	assert(filter);
+	gf_assert(filter);
 	if (filter->name)
 		return (const char *)filter->name;
 	return (const char *)filter->freg->name;
@@ -773,7 +774,7 @@ const char * gf_filter_get_name(GF_Filter *filter)
 GF_EXPORT
 void gf_filter_set_name(GF_Filter *filter, const char *name)
 {
-	assert(filter);
+	gf_assert(filter);
 
 	if (filter->name) gf_free(filter->name);
 	filter->name = gf_strdup(name ? name : filter->freg->name);
@@ -781,7 +782,7 @@ void gf_filter_set_name(GF_Filter *filter, const char *name)
 
 void gf_filter_set_id(GF_Filter *filter, const char *ID)
 {
-	assert(filter);
+	gf_assert(filter);
 
 	if (filter->id) gf_free(filter->id);
 	filter->id = ID ? gf_strdup(ID) : NULL;
@@ -800,7 +801,7 @@ void gf_filter_reset_source(GF_Filter *filter)
 
 static void gf_filter_set_sources(GF_Filter *filter, const char *sources_ID)
 {
-	assert(filter);
+	gf_assert(filter);
 
 	gf_mx_p(filter->session->filters_mx);
 
@@ -1207,7 +1208,7 @@ Bool gf_filter_update_arg_apply(GF_Filter *filter, const char *arg_name, const c
 
 		argv = gf_filter_parse_prop_solve_env_var(filter->session, filter, a->arg_type, a->arg_name, arg_value, a->min_max_enum);
 
-		if (argv.type != GF_PROP_FORBIDEN) {
+		if (argv.type != GF_PROP_FORBIDDEN) {
 			GF_Err e = GF_OK;
 			if (!is_sync_call) {
 				FSESS_CHECK_THREAD(filter)
@@ -1353,6 +1354,21 @@ static const char *gf_filter_load_arg_config(GF_Filter *filter, const char *sec_
 					is_ok = 2;
 					loc_alen=3;
 				}
+#ifdef GPAC_ENABLE_DEBUG
+				else if (!strncmp(arg, "DBG", len)) {
+					const char *val = sep+1;
+					if (val && !stricmp(val, "pid")) filter->prop_dump = 1;
+					else if (val && !stricmp(val, "pck")) filter->prop_dump = 2;
+					else if (val && !stricmp(val, "all")) filter->prop_dump = 3;
+					else if (!val) filter->prop_dump = 3;
+					else {
+						GF_LOG(GF_LOG_WARNING, GF_LOG_FILTER, ("Invalid DBG param syntax %s, expecting pid, pck or all\n", arg));
+					}
+					is_ok = 2;
+					loc_alen=3;
+				}
+#endif
+
 			}
 			if (!is_ok) continue;
 
@@ -1894,7 +1910,7 @@ skip_date:
 				if (reverse_bool && (argv.type==GF_PROP_BOOL))
 					argv.value.boolean = !argv.value.boolean;
 
-				if (argv.type != GF_PROP_FORBIDEN) {
+				if (argv.type != GF_PROP_FORBIDDEN) {
 					if (!for_script && (a->offset_in_private>=0)) {
 						gf_filter_set_arg(filter, a, &argv);
 					} else if (filter->freg->update_arg) {
@@ -2044,13 +2060,29 @@ skip_date:
 				found = GF_TRUE;
 				internal_arg = GF_TRUE;
 			}
+			else if (!strcmp("NCID", szArg)) {
+				if (filter->netcap_id) gf_free(filter->netcap_id);
+				filter->netcap_id = value ? gf_strdup(value) : NULL;
+				found = GF_TRUE;
+				internal_arg = GF_TRUE;
+			}
+#ifdef GPAC_ENABLE_DEBUG
+			else if (!strcmp("DBG", szArg)) {
+				if (value && !stricmp(value, "pid")) filter->prop_dump = 1;
+				else if (value && !stricmp(value, "pck")) filter->prop_dump = 2;
+				else if (value && !stricmp(value, "all")) filter->prop_dump = 3;
+				else if (!value) filter->prop_dump = 3;
+				found = GF_TRUE;
+				internal_arg = GF_TRUE;
+			}
+#endif
 			else if (!value && gf_file_exists(szArg)) {
 				internal_arg = GF_TRUE;
 				if (!for_script && (argfile_level<5) ) {
 					char szLine[2001];
 					FILE *arg_file = gf_fopen(szArg, "rt");
 					szLine[2000]=0;
-					while (!gf_feof(arg_file)) {
+					while (arg_file && !gf_feof(arg_file)) {
 						u32 llen;
 						char *subarg, *res_line;
 						szLine[0] = 0;
@@ -2079,7 +2111,11 @@ skip_date:
 
 						filter_parse_dyn_args(filter, subarg, arg_type, for_script, szSrc, szDst, szEscape, szSecName, has_meta_args, argfile_level+1);
 					}
-					gf_fclose(arg_file);
+					if (arg_file) {
+						gf_fclose(arg_file);
+					} else {
+						GF_LOG(GF_LOG_WARNING, GF_LOG_FILTER, ("Failed to open argument file %s, ignoring\n", szArg));
+					}
 				} else if (!for_script) {
 					GF_LOG(GF_LOG_ERROR, GF_LOG_FILTER, ("Filter argument file has too many nested levels of sub-files, maximum allowed is 5\n"));
 				}
@@ -2158,7 +2194,7 @@ static void gf_filter_parse_args(GF_Filter *filter, const char *args, GF_FilterA
 	const GF_FilterArgs *index_arg = NULL;
 #endif
 
-	//instantiate all args with defauts value
+	//instantiate all args with defaults value
 	f_args = filter->freg->args;
 	if (for_script)
 		f_args = filter->instance_args;
@@ -2187,7 +2223,7 @@ static void gf_filter_parse_args(GF_Filter *filter, const char *args, GF_FilterA
 
 		argv = gf_filter_parse_prop_solve_env_var(filter->session, filter, a->arg_type, a->arg_name, def_val, a->min_max_enum);
 
-		if (argv.type != GF_PROP_FORBIDEN) {
+		if (argv.type != GF_PROP_FORBIDDEN) {
 			if (!for_script && (a->offset_in_private>=0)) {
 				gf_filter_set_arg(filter, a, &argv);
 			} else if (filter->freg->update_arg) {
@@ -2226,14 +2262,14 @@ static void reset_filter_args(GF_Filter *filter)
 	//removed or no stack
 	if (!filter->filter_udta) return;
 
-	//instantiate all args with defauts value
+	//instantiate all args with defaults value
 	while (filter->freg->args) {
 		GF_PropertyValue argv;
 		const GF_FilterArgs *a = &filter->freg->args[i];
 		i++;
 		if (!a || !a->arg_name) break;
 
-		if (a->arg_type != GF_PROP_FORBIDEN) {
+		if (a->arg_type != GF_PROP_FORBIDDEN) {
 			memset(&argv, 0, sizeof(GF_PropertyValue));
 			argv.type = a->arg_type;
 			gf_filter_set_arg(filter, a, &argv);
@@ -2254,10 +2290,10 @@ void gf_filter_check_output_reconfig(GF_Filter *filter)
 			GF_FilterPidInst *pidi = gf_list_get(pid->destinations, j);
 			//PID was reconfigured, update props
 			if (pidi->reconfig_pid_props) {
-				assert(pidi->props);
+				gf_assert(pidi->props);
 				if (pidi->props != pidi->reconfig_pid_props) {
 					//unassign old property list and set the new one
-					assert(pidi->props->reference_count);
+					gf_assert(pidi->props->reference_count);
 					if (safe_int_dec(& pidi->props->reference_count) == 0) {
 						//see \ref gf_filter_pid_merge_properties_internal for mutex
 						gf_mx_p(pidi->pid->filter->tasks_mx);
@@ -2287,7 +2323,7 @@ static GF_FilterPidInst *filter_relink_get_upper_pid(GF_FilterPidInst *src_pidin
 		//filter was explicitly loaded, cannot go beyond
 		if (! pidinst->filter->dynamic_filter && !pidinst->filter->encoder_codec_id) break;
 		opid = gf_list_get(pidinst->filter->output_pids, 0);
-		assert(opid);
+		if (!opid) break;
 		//we have a fan-out, we cannot replace the filter graph after that point
 		//this would affect the other branches of the upper graph
 		if (opid->num_destinations != 1) break;
@@ -2314,7 +2350,7 @@ void gf_filter_relink_task(GF_FSTask *task)
 		return;
 	}
 	//good do go, unprotect pid
-	assert(cur_pidinst->detach_pending);
+	gf_assert(cur_pidinst->detach_pending);
 	safe_int_dec(&cur_pidinst->detach_pending);
 	task->filter->removed = 0;
 	e = cur_pidinst->loss_rate;
@@ -2339,7 +2375,7 @@ void gf_filter_relink_dst(GF_FilterPidInst *from_pidinst, GF_Err reason)
 	}
 	//locate the true destination
 	dst_pidinst = filter_relink_get_upper_pid(src_pidinst, &needs_flush);
-	assert(dst_pidinst);
+	gf_fatal_assert(dst_pidinst);
 
 	//make sure we flush the end of the pipeline  !
 	if (needs_flush) {
@@ -2404,18 +2440,18 @@ void gf_filter_relink_dst(GF_FilterPidInst *from_pidinst, GF_Err reason)
 		return;
 	}
 	//detach the pidinst, and relink from the new input pid
-	gf_filter_renegociate_output_dst(link_from_pid, link_from_pid->filter, filter_dst, dst_pidinst, src_pidinst);
+	gf_filter_renegotiate_output_dst(link_from_pid, link_from_pid->filter, filter_dst, dst_pidinst, src_pidinst);
 }
 
-GF_Filter *gf_fs_load_encoder(GF_FilterSession *fsess, const char *args, GF_List *filter_blacklist);
+GF_Filter *gf_fs_load_encoder(GF_FilterSession *fsess, const char *args, GF_List *filter_blacklist, GF_Err *err_code);
 
-void gf_filter_renegociate_output_dst(GF_FilterPid *pid, GF_Filter *filter, GF_Filter *filter_dst, GF_FilterPidInst *dst_pidi, GF_FilterPidInst *src_pidi)
+void gf_filter_renegotiate_output_dst(GF_FilterPid *pid, GF_Filter *filter, GF_Filter *filter_dst, GF_FilterPidInst *dst_pidi, GF_FilterPidInst *src_pidi)
 {
 	Bool is_new_chain = GF_TRUE;
 	GF_Filter *new_f, *src_f;
 	Bool reconfig_only = src_pidi ? GF_FALSE: GF_TRUE;
 
-	assert(filter);
+	gf_assert(filter);
 
 	if (!filter_dst) {
 		GF_LOG(GF_LOG_ERROR, GF_LOG_FILTER, ("Internal error, lost destination for pid %s in filter %s while negotiating caps !!\n", pid->name, filter->name));
@@ -2425,7 +2461,7 @@ void gf_filter_renegociate_output_dst(GF_FilterPid *pid, GF_Filter *filter, GF_F
 	src_f = src_pidi ? src_pidi->pid->filter : pid->pid->filter;
 
 	if (src_pidi && src_pidi->filter->encoder_codec_id) {
-		new_f = gf_fs_load_encoder(filter->session, src_pidi->filter->orig_args, filter->blacklisted);
+		new_f = gf_fs_load_encoder(filter->session, src_pidi->filter->orig_args, filter->blacklisted, NULL);
 
 		//store destination
 		if (new_f) {
@@ -2442,7 +2478,7 @@ void gf_filter_renegociate_output_dst(GF_FilterPid *pid, GF_Filter *filter, GF_F
 	) {
 		GF_FilterPidInst *a_dst_pidi;
 		new_f = pid->filter;
-		assert(pid->num_destinations==1);
+		gf_assert(pid->num_destinations==1);
 		a_dst_pidi = gf_list_get(pid->destinations, 0);
 		//we are replacing the chain, remove filters until dest, keeping the final PID connected since we will detach
 		// and reattach it
@@ -2451,7 +2487,7 @@ void gf_filter_renegociate_output_dst(GF_FilterPid *pid, GF_Filter *filter, GF_F
 		is_new_chain = GF_FALSE;
 
 		//we will reassign packets from that pid instance to the new connection
-		assert(!filter_dst->swap_pidinst_dst);
+		gf_assert(!filter_dst->swap_pidinst_dst);
 		filter_dst->swap_pidinst_dst = a_dst_pidi;
 		filter_dst->swap_pending = GF_TRUE;
 
@@ -2471,7 +2507,7 @@ void gf_filter_renegociate_output_dst(GF_FilterPid *pid, GF_Filter *filter, GF_F
 		if (!new_f && filter_dst->forced_caps) {
 			new_f = gf_filter_pid_resolve_link_for_caps(pid, filter_dst, GF_FALSE);
 			if (new_f) {
-				//drop caps negociate
+				//drop caps negotiate
 				reconfig_only = GF_FALSE;
 			}
 		}
@@ -2514,8 +2550,8 @@ void gf_filter_renegociate_output_dst(GF_FilterPid *pid, GF_Filter *filter, GF_F
 		if (is_new_chain) {
 			//signal a stream reset is pending to prevent filter entering endless loop
 			safe_int_inc(&dst_pidi->filter->stream_reset_pending);
-			assert(!new_f->swap_pidinst_dst);
-			assert(!new_f->swap_pidinst_src);
+			gf_assert(!new_f->swap_pidinst_dst);
+			gf_assert(!new_f->swap_pidinst_src);
 			//keep track of the pidinst being detached in the target filter
 			new_f->swap_pidinst_dst = dst_pidi;
 			//keep track of the pidinst being detached from the source filter
@@ -2532,9 +2568,9 @@ void gf_filter_renegociate_output_dst(GF_FilterPid *pid, GF_Filter *filter, GF_F
 	}
 
 	if (reconfig_only) {
-		assert(pid->caps_negociate);
-		new_f->caps_negociate = pid->caps_negociate;
-		safe_int_inc(&new_f->caps_negociate->reference_count);
+		gf_fatal_assert(pid->caps_negotiate);
+		new_f->caps_negotiate = pid->caps_negotiate;
+		safe_int_inc(&new_f->caps_negotiate->reference_count);
 	}
 
 	if (is_new_chain) {
@@ -2558,12 +2594,12 @@ Bool gf_filter_reconf_output(GF_Filter *filter, GF_FilterPid *pid)
 	if (filter->is_pid_adaptation_filter) {
 		//do not remove from destination_filters, needed for end of pid_init task
 		if (!filter->dst_filter) filter->dst_filter = gf_list_get(filter->destination_filters, 0);
-		assert(filter->dst_filter);
-		assert(filter->num_input_pids==1);
+		gf_assert(filter->dst_filter);
+		gf_assert(filter->num_input_pids==1);
 	}
 	//swap to pid
-	pid->caps_negociate = filter->caps_negociate;
-	filter->caps_negociate = NULL;
+	pid->caps_negotiate = filter->caps_negotiate;
+	filter->caps_negotiate = NULL;
 	if (filter->freg->reconfigure_output) {
 		e = filter->freg->reconfigure_output(filter, pid);
 	} else {
@@ -2586,11 +2622,11 @@ Bool gf_filter_reconf_output(GF_Filter *filter, GF_FilterPid *pid)
 		gf_list_del(pid->adapters_blacklist);
 		src_pid->adapters_blacklist = NULL;
 	}
-	assert(pid->caps_negociate->reference_count);
-	if (safe_int_dec(&pid->caps_negociate->reference_count) == 0) {
-		gf_props_del(pid->caps_negociate);
+	gf_assert(pid->caps_negotiate->reference_count);
+	if (safe_int_dec(&pid->caps_negotiate->reference_count) == 0) {
+		gf_props_del(pid->caps_negotiate);
 	}
-	pid->caps_negociate = NULL;
+	pid->caps_negotiate = NULL;
 	if (filter->is_pid_adaptation_filter) {
 		filter->dst_filter = NULL;
 	}
@@ -2598,27 +2634,27 @@ Bool gf_filter_reconf_output(GF_Filter *filter, GF_FilterPid *pid)
 	return GF_TRUE;
 }
 
-static void gf_filter_renegociate_output(GF_Filter *filter, Bool force_afchain_insert)
+static void gf_filter_renegotiate_output(GF_Filter *filter, Bool force_afchain_insert)
 {
 	u32 i, j;
-	assert(filter->nb_caps_renegociate );
-	safe_int_dec(& filter->nb_caps_renegociate );
+	gf_assert(filter->nb_caps_renegotiate );
+	safe_int_dec(& filter->nb_caps_renegotiate );
 
 	gf_mx_p(filter->tasks_mx);
 
 	for (i=0; i<filter->num_output_pids; i++) {
 		GF_FilterPid *pid = gf_list_get(filter->output_pids, i);
-		if (pid->caps_negociate) {
+		if (pid->caps_negotiate) {
 			Bool is_ok = GF_FALSE;
 			Bool reconfig_direct = GF_FALSE;
 
-			//the caps_negociate property map is create with ref count 1
+			//the caps_negotiate property map is create with ref count 1
 
 			//no fanout, we can try direct reconfigure of the filter
 			if (pid->num_destinations<=1)
 				reconfig_direct = GF_TRUE;
-			//fanout but we have as many pid instances being negociated as there are destinations, we can try direct reconfigure
-			else if (pid->num_destinations==gf_list_count(pid->caps_negociate_pidi_list) && pid->caps_negociate_direct)
+			//fanout but we have as many pid instances being negotiated as there are destinations, we can try direct reconfigure
+			else if (pid->num_destinations==gf_list_count(pid->caps_negotiate_pidi_list) && pid->caps_negotiate_direct)
 				reconfig_direct = GF_TRUE;
 
 			//we cannot reconfigure output if more than one destination
@@ -2631,19 +2667,19 @@ static void gf_filter_renegociate_output(GF_Filter *filter, Bool force_afchain_i
 
 						GF_LOG(GF_LOG_WARNING, GF_LOG_FILTER, ("PID Adaptation Filter %s output reconfiguration error %s, discarding filter and reloading new adaptation chain\n", filter->name, gf_error_to_string(e)));
 
-						assert(filter->num_input_pids==1);
+						gf_assert(filter->num_input_pids==1);
 
 						gf_filter_pid_retry_caps_negotiate(src_pidi->pid, pid, pidi->filter);
 
 						continue;
 					}
-					GF_LOG(GF_LOG_WARNING, GF_LOG_FILTER, ("Filter %s output reconfiguration error %s, loading filter chain for renegociation\n", filter->name, gf_error_to_string(e)));
+					GF_LOG(GF_LOG_WARNING, GF_LOG_FILTER, ("Filter %s output reconfiguration error %s, loading filter chain for renegotiation\n", filter->name, gf_error_to_string(e)));
 				} else {
 					is_ok = GF_TRUE;
 					gf_filter_check_output_reconfig(filter);
 				}
 			} else {
-				GF_LOG(GF_LOG_INFO, GF_LOG_FILTER, ("Filter %s cannot reconfigure output pids, loading filter chain for renegociation\n", filter->name));
+				GF_LOG(GF_LOG_INFO, GF_LOG_FILTER, ("Filter %s cannot reconfigure output pids, loading filter chain for renegotiation\n", filter->name));
 			}
 
 			if (!is_ok) {
@@ -2652,43 +2688,43 @@ static void gf_filter_renegociate_output(GF_Filter *filter, Bool force_afchain_i
 				if (pid->num_destinations) {
 					for (j=0; j<pid->num_destinations; j++) {
 						GF_FilterPidInst *pidi = gf_list_get(pid->destinations, j);
-						if (gf_list_find(pid->caps_negociate_pidi_list, pidi)<0)
+						if (gf_list_find(pid->caps_negotiate_pidi_list, pidi)<0)
 							continue;
 						filter_dst = pidi->filter;
 
 						//prevent filter from unloading in case we have to disconnect the pid
 						if (!filter_dst->sticky) filter_dst->sticky = 2;
-						gf_filter_renegociate_output_dst(pid, filter, filter_dst, pidi, NULL);
+						gf_filter_renegotiate_output_dst(pid, filter, filter_dst, pidi, NULL);
 
 					}
 				}
 				//we are disconnected (unload of a previous adaptation filter)
 				else {
 					filter_dst = pid->caps_dst_filter;
-					assert(pid->num_destinations==0);
+					gf_assert(pid->num_destinations==0);
 					pid->caps_dst_filter = NULL;
-					gf_filter_renegociate_output_dst(pid, filter, filter_dst, NULL, NULL);
+					gf_filter_renegotiate_output_dst(pid, filter, filter_dst, NULL, NULL);
 				}
 			}
-			assert(pid->caps_negociate->reference_count);
-			if (safe_int_dec(&pid->caps_negociate->reference_count) == 0) {
-				gf_props_del(pid->caps_negociate);
+			gf_assert(pid->caps_negotiate->reference_count);
+			if (safe_int_dec(&pid->caps_negotiate->reference_count) == 0) {
+				gf_props_del(pid->caps_negotiate);
 			}
-			pid->caps_negociate = NULL;
-			if (pid->caps_negociate_pidi_list) {
-				gf_list_del(pid->caps_negociate_pidi_list);
-				pid->caps_negociate_pidi_list = NULL;
+			pid->caps_negotiate = NULL;
+			if (pid->caps_negotiate_pidi_list) {
+				gf_list_del(pid->caps_negotiate_pidi_list);
+				pid->caps_negotiate_pidi_list = NULL;
 			}
 		}
 	}
 	gf_mx_v(filter->tasks_mx);
 }
 
-void gf_filter_renegociate_output_task(GF_FSTask *task)
+void gf_filter_renegotiate_output_task(GF_FSTask *task)
 {
-	//it is possible that the cap renegociation was already done at the time we process this task
-	if (task->filter->nb_caps_renegociate)
-		gf_filter_renegociate_output(task->filter, GF_TRUE);
+	//it is possible that the cap renegotiation was already done at the time we process this task
+	if (task->filter->nb_caps_renegotiate)
+		gf_filter_renegotiate_output(task->filter, GF_TRUE);
 }
 
 static Bool session_should_abort(GF_FilterSession *fs)
@@ -2708,8 +2744,8 @@ static void gf_filter_check_pending_tasks(GF_Filter *filter, GF_FSTask *task)
 	//TODO: find a way to bypass this mutex ?
 	gf_mx_p(filter->tasks_mx);
 
-	assert(filter->scheduled_for_next_task || filter->session->direct_mode);
-	assert(filter->process_task_queued);
+	gf_assert(filter->scheduled_for_next_task || filter->session->direct_mode);
+	gf_assert(filter->process_task_queued);
 	if (safe_int_dec(&filter->process_task_queued) == 0) {
 		//we have pending packets, auto-post and requeue
 		if (filter->pending_packets && filter->num_input_pids) {
@@ -2856,9 +2892,9 @@ static void gf_filter_process_task(GF_FSTask *task)
 	Bool skip_block_mode = GF_FALSE;
 	GF_Filter *filter = task->filter;
 	Bool force_block_state_check=GF_FALSE;
-	assert(task->filter);
-	assert(filter->freg);
-	assert(filter->freg->process);
+	gf_assert(task->filter);
+	gf_assert(filter->freg);
+	gf_assert(filter->freg->process);
 	task->can_swap = 1;
 
 	filter->schedule_next_time = 0;
@@ -2871,13 +2907,13 @@ static void gf_filter_process_task(GF_FSTask *task)
 		return;
 	}
 
-	if (filter->out_pid_connection_pending || filter->detached_pid_inst || filter->caps_negociate) {
-		GF_LOG(GF_LOG_DEBUG, GF_LOG_FILTER, ("Filter %s has %s pending, requeuing process\n", filter->name, filter->out_pid_connection_pending ? "connections" : filter->caps_negociate ? "caps negociation" : "input pid reassignments"));
+	if (filter->out_pid_connection_pending || filter->detached_pid_inst || filter->caps_negotiate) {
+		GF_LOG(GF_LOG_DEBUG, GF_LOG_FILTER, ("Filter %s has %s pending, requeuing process\n", filter->name, filter->out_pid_connection_pending ? "connections" : filter->caps_negotiate ? "caps negotiation" : "input pid reassignments"));
 		//do not cancel the process task since it might have been triggered by the filter itself,
 		//we would not longer call it
 		task->requeue_request = GF_TRUE;
 
- 		assert(filter->process_task_queued);
+ 		gf_assert(filter->process_task_queued);
 		//in we are during the graph resolution phase, to not ask for RT reschedule: this can post-pone process tasks and change their initial
 		//scheduling order, resulting in random change of input pid declaration, for example:
 		//fin1 -> reframe1 -> fA
@@ -2917,11 +2953,14 @@ static void gf_filter_process_task(GF_FSTask *task)
 		GF_LOG(GF_LOG_DEBUG, GF_LOG_FILTER, ("Filter %s has stream reset pending, postponing process\n", filter->name));
 		filter->nb_tasks_done--;
 		task->requeue_request = GF_TRUE;
-		assert(filter->process_task_queued);
+		gf_assert(filter->process_task_queued);
 		return;
 	}
-	assert(filter->process_task_queued);
-	assert(!filter->multi_sink_target);
+	gf_assert(filter->process_task_queued);
+	if (filter->multi_sink_target) {
+		GF_LOG(GF_LOG_ERROR, GF_LOG_FILTER, ("Filter %s is a multi-sink target, process disabled\n", filter->name));
+		return;
+	}
 
 	//the following breaks demuxers where PIDs are not all known from start: if we filter some pids due to user request,
 	//we may end up with the following test true but not all PIDs yet declared, hence no more processing
@@ -2954,8 +2993,8 @@ static void gf_filter_process_task(GF_FSTask *task)
 
 	filter->nb_pck_io = 0;
 
-	if (filter->nb_caps_renegociate) {
-		gf_filter_renegociate_output(filter, GF_FALSE);
+	if (filter->nb_caps_renegotiate) {
+		gf_filter_renegotiate_output(filter, GF_FALSE);
 	}
 
 	GF_LOG(GF_LOG_DEBUG, GF_LOG_FILTER, ("Filter %s process\n", filter->name));
@@ -3032,14 +3071,14 @@ static void gf_filter_process_task(GF_FSTask *task)
 		if (filter->schedule_next_time)
 			task->schedule_next_time = filter->schedule_next_time;
 		task->requeue_request = GF_TRUE;
-		assert(filter->process_task_queued);
+		gf_assert(filter->process_task_queued);
 	}
 	//filter requested a requeue
 	else if (filter->schedule_next_time) {
 		if (!filter->session->in_final_flush) {
 			task->schedule_next_time = filter->schedule_next_time;
 			task->requeue_request = GF_TRUE;
-			assert(filter->process_task_queued);
+			gf_assert(filter->process_task_queued);
 		}
 	}
 	//last task for filter but pending packets and not blocking, requeue in main scheduler
@@ -3059,14 +3098,14 @@ static void gf_filter_process_task(GF_FSTask *task)
 		}
 		task->requeue_request = GF_TRUE;
 		task->can_swap = 2;
-		assert(filter->process_task_queued);
+		gf_assert(filter->process_task_queued);
 	}
 	else {
-		assert (!filter->schedule_next_time);
+		gf_assert (!filter->schedule_next_time);
 		gf_filter_check_pending_tasks(filter, task);
 		if (task->requeue_request) {
 			task->can_swap = 2;
-			assert(filter->process_task_queued);
+			gf_assert(filter->process_task_queued);
 		}
 	}
 }
@@ -3145,7 +3184,7 @@ GF_Filter *gf_filter_clone(GF_Filter *filter, GF_Filter *source_filter)
 		GF_Filter *old_source;
 		GF_FilterPidInst *first_in = gf_list_get(filter->input_pids, 0);
 		//if source filter is set, this is a clone due to a new instance request, so we have at least one input
-		assert(first_in);
+		if (!first_in) return NULL;
 		old_source = first_in->pid->filter;
 		//get source arguments for new source filter connecting to the clone
 		const char *args_src_new = gf_filter_get_args_stripped(filter->session, source_filter->src_args ? source_filter->src_args : source_filter->orig_args, GF_FALSE);
@@ -3225,7 +3264,7 @@ void gf_filter_post_process_task_internal(GF_Filter *filter, Bool use_direct_dis
 
 	//lock task mx to take the decision whether to post a new task or not (cf gf_filter_check_pending_tasks)
 	gf_mx_p(filter->tasks_mx);
-	assert((s32)filter->process_task_queued>=0);
+	gf_assert((s32)filter->process_task_queued>=0);
 
 	if (use_direct_dispatch) {
 		safe_int_inc(&filter->process_task_queued);
@@ -3235,7 +3274,7 @@ void gf_filter_post_process_task_internal(GF_Filter *filter, Bool use_direct_dis
 		gf_fs_post_task(filter->session, gf_filter_process_task, filter, NULL, "process", NULL);
 	} else {
 		GF_LOG(GF_LOG_DEBUG, GF_LOG_FILTER, ("Filter %s skip post process task\n", filter->name));
-		assert(filter->session->run_status
+		gf_assert(filter->session->run_status
 		 		|| filter->session->in_final_flush
 		 		|| filter->disabled
 				|| filter->scheduled_for_next_task
@@ -3244,7 +3283,7 @@ void gf_filter_post_process_task_internal(GF_Filter *filter, Bool use_direct_dis
 		);
 	}
 	if (!filter->session->direct_mode && !use_direct_dispatch) {
-		assert(filter->process_task_queued);
+		gf_assert(filter->process_task_queued);
 	}
 	gf_mx_v(filter->tasks_mx);
 }
@@ -3479,7 +3518,7 @@ void gf_filter_remove_task(GF_FSTask *task)
 		return;
 	}
 
-	assert(f->finalized);
+	gf_assert(f->finalized);
 
 	if (count!=1) {
 		task->requeue_request = GF_TRUE;
@@ -3527,9 +3566,9 @@ void gf_filter_post_remove(GF_Filter *filter)
 {
 	//session about to be destroy, don't post task
 	if (filter->session->run_status==GF_EOS) return;
-	assert(!filter->swap_pidinst_dst);
-	assert(!filter->swap_pidinst_src);
-	assert(!filter->finalized);
+	gf_assert(!filter->swap_pidinst_dst);
+	gf_assert(!filter->swap_pidinst_src);
+	gf_assert(!filter->finalized);
 	filter->finalized = GF_TRUE;
 
 	//post remove task ON THE FILTER, otherwise we might end up having 2 threads on the active filter
@@ -3618,7 +3657,7 @@ void gf_filter_remove_internal(GF_Filter *filter, GF_Filter *until_filter, Bool 
 		GF_LOG(GF_LOG_INFO, GF_LOG_FILTER, ("Disconnecting filter %s from session\n", filter->name));
 	}
 	//get all dest pids, post disconnect and mark filters as removed
-	assert(!filter->removed);
+	gf_assert(!filter->removed);
 	filter->removed = 1;
 	for (i=0; i<filter->num_output_pids; i++) {
 		GF_FilterPid *pid = gf_list_get(filter->output_pids, i);
@@ -3707,7 +3746,7 @@ void gf_filter_remove(GF_Filter *filter)
 		} else {
 			GF_FilterEvent fevt;
 			//source filter still active, mark output pid as not connected, send a stop and post disconnect
-			assert(pidi->pid->num_destinations==1);
+			gf_assert(pidi->pid->num_destinations==1);
 			pidi->pid->not_connected=1;
 			pidi->pid->filter->num_out_pids_not_connected++;
 			GF_FEVT_INIT(fevt, GF_FEVT_STOP, (GF_FilterPid *) pidi);
@@ -4322,7 +4361,15 @@ GF_Err gf_filter_pid_raw_new(GF_Filter *filter, const char *url, const char *loc
 			gf_filter_pid_set_property(pid, GF_PROP_PID_FILE_EXT, &PROP_STRING(tmp_ext));
 			ext_len = (u32) strlen(tmp_ext);
 		} else {
-			char *ext = gf_file_ext_start(url);
+			char *ext=NULL;
+			char *scheme = strncmp(url, "gfio://", 7) ? strstr(url, "://") : NULL;
+			if (scheme) {
+				scheme = strchr(scheme+3, '/');
+				if (scheme)
+					ext = gf_file_ext_start(scheme);
+			} else {
+				ext = gf_file_ext_start(url);
+			}
 			if (ext) ext++;
 
 			if (ext) {
@@ -5276,6 +5323,8 @@ GF_Err gf_filter_tag_subsession(GF_Filter *filter, u32 subsession_id, u32 source
 	if (!filter) return GF_BAD_PARAM;
 	//ignored in non implicit mode
 	if (! (filter->session->flags & GF_FS_FLAG_IMPLICIT_MODE)) return GF_OK;
+	//subsession explicitly assigned
+	if (filter->subsession_id) return filter->subsession_id;
 	filter->subsession_id = subsession_id;
 	if (gf_filter_is_sink(filter))
 		filter->subsource_id = 0;
@@ -5310,6 +5359,19 @@ const char *gf_filter_meta_get_instances(GF_Filter *filter)
 {
 	return filter ? filter->meta_instances : NULL;
 }
+
+void gf_filter_skip_seg_size_events(GF_Filter *filter)
+{
+	if (filter) filter->no_segsize_evts=GF_TRUE;
+}
+
+	//filter netcap_id
+GF_EXPORT
+const char *gf_filter_get_netcap_id(GF_Filter *filter)
+{
+	return filter ? filter->netcap_id : NULL;
+}
+
 
 #if 0
 void gf_filter_pid_dump_buffers(GF_FilterPid *pid)

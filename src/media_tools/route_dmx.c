@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2018-2022
+ *			Copyright (c) Telecom ParisTech 2018-2023
  *					All rights reserved
  *
  *  This file is part of GPAC / Media Tools ROUTE (ATSC3, DVB-I) demux sub-project
@@ -135,6 +135,7 @@ typedef struct
 
 struct __gf_routedmx {
 	const char *ip_ifce;
+	const char *netcap_id;
 	GF_Socket *atsc_sock;
 	u8 *buffer;
 	u32 buffer_size;
@@ -252,7 +253,7 @@ void gf_route_dmx_del(GF_ROUTEDmx *routedmx)
 	gf_free(routedmx);
 }
 
-static GF_ROUTEDmx *gf_route_dmx_new_internal(const char *ifce, u32 sock_buffer_size, Bool is_atsc,
+static GF_ROUTEDmx *gf_route_dmx_new_internal(const char *ifce, u32 sock_buffer_size, const char *netcap_id, Bool is_atsc,
 							  void (*on_event)(void *udta, GF_ROUTEEventType evt, u32 evt_param, GF_ROUTEEventFileInfo *info),
 							  void *udta)
 {
@@ -264,6 +265,7 @@ static GF_ROUTEDmx *gf_route_dmx_new_internal(const char *ifce, u32 sock_buffer_
 		return NULL;
 	}
 	routedmx->ip_ifce = ifce;
+	routedmx->netcap_id = netcap_id;
 	routedmx->dom = gf_xml_dom_new();
 	if (!routedmx->dom) {
 		GF_LOG(GF_LOG_ERROR, GF_LOG_ROUTE, ("[ROUTE] Failed to allocate DOM parser\n" ));
@@ -323,7 +325,7 @@ static GF_ROUTEDmx *gf_route_dmx_new_internal(const char *ifce, u32 sock_buffer_
 	if (!is_atsc)
 		return routedmx;
 
-	routedmx->atsc_sock = gf_sk_new(GF_SOCK_TYPE_UDP);
+	routedmx->atsc_sock = gf_sk_new_ex(GF_SOCK_TYPE_UDP, routedmx->netcap_id);
 	if (!routedmx->atsc_sock) {
 		gf_route_dmx_del(routedmx);
 		GF_LOG(GF_LOG_ERROR, GF_LOG_ROUTE, ("[ROUTE] Failed to create UDP socket\n"));
@@ -376,7 +378,7 @@ static void gf_route_create_service(GF_ROUTEDmx *routedmx, const char *dst_ip, u
 	service->service_id = service_id;
 	service->protocol = protocol;
 
-	service->sock = gf_sk_new(GF_SOCK_TYPE_UDP);
+	service->sock = gf_sk_new_ex(GF_SOCK_TYPE_UDP, routedmx->netcap_id);
 	gf_sk_set_usec_wait(service->sock, 1);
 	e = gf_sk_setup_multicast(service->sock, dst_ip, dst_port, 0, GF_FALSE, (char*) routedmx->ip_ifce);
 	if (e) {
@@ -422,15 +424,33 @@ GF_ROUTEDmx *gf_route_atsc_dmx_new(const char *ifce, u32 sock_buffer_size,
 								   void (*on_event)(void *udta, GF_ROUTEEventType evt, u32 evt_param, GF_ROUTEEventFileInfo *info),
 								   void *udta)
 {
-	return gf_route_dmx_new_internal(ifce, sock_buffer_size, GF_TRUE, on_event, udta);
-
+	return gf_route_dmx_new_internal(ifce, sock_buffer_size, NULL, GF_TRUE, on_event, udta);
 }
 GF_EXPORT
 GF_ROUTEDmx *gf_route_dmx_new(const char *ip, u32 port, const char *ifce, u32 sock_buffer_size,
 							  void (*on_event)(void *udta, GF_ROUTEEventType evt, u32 evt_param, GF_ROUTEEventFileInfo *info),
 							  void *udta)
 {
-	GF_ROUTEDmx *routedmx = gf_route_dmx_new_internal(ifce, sock_buffer_size, GF_FALSE, on_event, udta);
+	GF_ROUTEDmx *routedmx = gf_route_dmx_new_internal(ifce, sock_buffer_size, NULL, GF_FALSE, on_event, udta);
+	if (!routedmx) return NULL;
+	gf_route_create_service(routedmx, ip, port, 1, 1);
+	return routedmx;
+}
+
+
+GF_EXPORT
+GF_ROUTEDmx *gf_route_atsc_dmx_new_ex(const char *ifce, u32 sock_buffer_size, const char *netcap_id,
+								   void (*on_event)(void *udta, GF_ROUTEEventType evt, u32 evt_param, GF_ROUTEEventFileInfo *info),
+								   void *udta)
+{
+	return gf_route_dmx_new_internal(ifce, sock_buffer_size, netcap_id, GF_TRUE, on_event, udta);
+}
+GF_EXPORT
+GF_ROUTEDmx *gf_route_dmx_new_ex(const char *ip, u32 port, const char *ifce, u32 sock_buffer_size, const char *netcap_id,
+							  void (*on_event)(void *udta, GF_ROUTEEventType evt, u32 evt_param, GF_ROUTEEventFileInfo *info),
+							  void *udta)
+{
+	GF_ROUTEDmx *routedmx = gf_route_dmx_new_internal(ifce, sock_buffer_size, netcap_id, GF_FALSE, on_event, udta);
 	if (!routedmx) return NULL;
 	gf_route_create_service(routedmx, ip, port, 1, 1);
 	return routedmx;
@@ -621,10 +641,16 @@ static GF_Err gf_route_dmx_push_object(GF_ROUTEDmx *routedmx, GF_ROUTEService *s
     if (obj->rlct_file) {
         filepath = obj->rlct_file->filename ? obj->rlct_file->filename : "ghost-init.mp4";
         is_init = GF_TRUE;
-        assert(final_push);
+        gf_assert(final_push);
     } else {
-        if (!obj->solved_path[0])
+        if (!obj->solved_path[0]) {
+			if (!obj->rlct->toi_template) {
+				if (obj->status != GF_LCT_OBJ_RECEPTION)
+					gf_route_obj_to_reservoir(routedmx, s, obj);
+				return GF_OK;
+			}
             sprintf(obj->solved_path, obj->rlct->toi_template, obj->toi);
+		}
         filepath = obj->solved_path;
     }
 #ifndef GPAC_DISABLE_LOG
@@ -665,7 +691,7 @@ static GF_Err gf_route_dmx_push_object(GF_ROUTEDmx *routedmx, GF_ROUTEService *s
             evt_type = GF_ROUTE_EVT_DYN_SEG;
             finfo.nb_frags = obj->nb_frags;
             finfo.frags = obj->frags;
-			assert(obj->total_length <= obj->alloc_size);
+			gf_assert(obj->total_length <= obj->alloc_size);
         }
         else
             evt_type = GF_ROUTE_EVT_DYN_SEG_FRAG;
@@ -690,7 +716,8 @@ static GF_Err gf_route_dmx_process_object(GF_ROUTEDmx *routedmx, GF_ROUTEService
 		GF_LOG(GF_LOG_ERROR, GF_LOG_ROUTE, ("[ROUTE] Service %d : internal error, no LCT ROUTE channel defined for object TSI %u TOI %u\n", s->service_id, obj->tsi, obj->toi));
 		return GF_SERVICE_ERROR;
 	}
-	assert(obj->status>GF_LCT_OBJ_RECEPTION);
+	if (obj->status<GF_LCT_OBJ_RECEPTION)
+		return GF_SERVICE_ERROR;
 
 	if (obj->status==GF_LCT_OBJ_DONE_ERR) {
 		if (obj->rlct->tsi_init) {
@@ -885,8 +912,8 @@ static GF_Err gf_route_service_gather_object(GF_ROUTEDmx *routedmx, GF_ROUTEServ
 		s->last_active_obj = obj;
 	}
 	*gather_obj = obj;
-	assert(obj->toi == toi);
-	assert(obj->tsi == tsi);
+	gf_assert(obj->toi == toi);
+	gf_assert(obj->tsi == tsi);
 
 	//keep receiving if we are done with errors
 	if (obj->status >= GF_LCT_OBJ_DONE) {
@@ -954,8 +981,8 @@ static GF_Err gf_route_service_gather_object(GF_ROUTEDmx *routedmx, GF_ROUTEServ
 	obj->nb_recv_frags++;
 	obj->status = GF_LCT_OBJ_RECEPTION;
 
-	assert(obj->toi == toi);
-	assert(obj->tsi == tsi);
+	gf_assert(obj->toi == toi);
+	gf_assert(obj->tsi == tsi);
 	if (start_offset + size > obj->alloc_size) {
 		obj->alloc_size = start_offset + size;
 		//use total size if available
@@ -970,14 +997,14 @@ static GF_Err gf_route_service_gather_object(GF_ROUTEDmx *routedmx, GF_ROUTEServ
         obj->blob.data = obj->payload;
         gf_mx_v(routedmx->blob_mx);
     }
-	assert(obj->alloc_size >= start_offset + size);
+	gf_assert(obj->alloc_size >= start_offset + size);
 
 	memcpy(obj->payload + start_offset, data, size);
 	GF_LOG(GF_LOG_DEBUG, GF_LOG_ROUTE, ("[ROUTE] Service %d TSI %u TOI %u append LCT fragment, offset %d total size %d recv bytes %d - offset diff since last %d\n", s->service_id, obj->tsi, obj->toi, start_offset, obj->total_length, obj->nb_bytes, (s32) start_offset - (s32) obj->prev_start_offset));
 
 	obj->prev_start_offset = start_offset;
-	assert(obj->toi == toi);
-	assert(obj->tsi == tsi);
+	gf_assert(obj->toi == toi);
+	gf_assert(obj->tsi == tsi);
     
     //not a file (uses templates->segment) and can push
     if (do_push && !obj->rlct_file && obj->rlct) {
@@ -1123,7 +1150,7 @@ static GF_Err gf_route_service_setup_stsid(GF_ROUTEDmx *routedmx, GF_ROUTEServic
 
 		//need a new socket for the session
 		if ((strcmp(s->dst_ip, dst_ip)) || (s->port != dst_port) ) {
-			rsess->sock = gf_sk_new(GF_SOCK_TYPE_UDP);
+			rsess->sock = gf_sk_new_ex(GF_SOCK_TYPE_UDP, routedmx->netcap_id);
 			gf_sk_set_usec_wait(rsess->sock, 1);
 			e = gf_sk_setup_multicast(rsess->sock, dst_ip, dst_port, 0, GF_FALSE, (char *) routedmx->ip_ifce);
 			if (e) {
@@ -1356,7 +1383,7 @@ static GF_Err gf_route_dmx_process_service_signaling(GF_ROUTEDmx *routedmx, GF_R
 		}
 		memcpy(routedmx->buffer, object->payload, object->total_length);
 		raw_size = routedmx->unz_buffer_size;
-		e = gf_gz_decompress_payload(routedmx->buffer, object->total_length, &routedmx->unz_buffer, &raw_size);
+		e = gf_gz_decompress_payload_ex(routedmx->buffer, object->total_length, &routedmx->unz_buffer, &raw_size, GF_TRUE);
 		if (e) {
 			GF_LOG(GF_LOG_ERROR, GF_LOG_ROUTE, ("[ROUTE] Service %d failed to decompress signaling bundle: %s\n", s->service_id, gf_error_to_string(e) ));
 			return e;
@@ -1367,6 +1394,10 @@ static GF_Err gf_route_dmx_process_service_signaling(GF_ROUTEDmx *routedmx, GF_R
 	} else {
 		payload = object->payload;
 		payload_size = object->total_length;
+		// Verifying that the payload is not erroneously treated as plaintext
+		if(!isprint(payload[0])) {
+			GF_LOG(GF_LOG_WARNING, GF_LOG_ROUTE, ("[ROUTE] Service %d package appears to be compressed but is being treated as plaintext:\n%s\n", s->service_id, payload));
+		}
 	}
 	payload[payload_size] = 0;
 
@@ -1407,25 +1438,31 @@ static GF_Err gf_route_dmx_process_service_signaling(GF_ROUTEDmx *routedmx, GF_R
 		}
 
 		//extract headers
-		while (strncmp(payload, "\r\n\r\n", 4)) {
+		while (payload[0] && strncmp(payload, "\r\n\r\n", 4)) {
 			u32 i=0;
-			while (strchr("\n\r", payload[0]) != NULL) payload++;
-			while (strchr("\r\n", payload[i]) == NULL) i++;
+			while (payload[0] && strchr("\n\r", payload[0]) != NULL) payload++;
+			while (payload[i] && strchr("\r\n", payload[i]) == NULL) i++;
 
 			if (!strnicmp(payload, "Content-Type: ", 14)) {
 				u32 copy = MIN(i-14, 100);
 				strncpy(szContentType, payload+14, copy);
 				szContentType[copy]=0;
-				payload += i;
 			}
 			else if (!strnicmp(payload, "Content-Location: ", 18)) {
 				u32 copy = MIN(i-18, 1024);
 				strncpy(szContentLocation, payload+18, copy);
 				szContentLocation[copy]=0;
-				payload += i;
 			} else {
-				GF_LOG(GF_LOG_WARNING, GF_LOG_ROUTE, ("[ROUTE] Service %d unrecognized header entity in package:\n%s\n", s->service_id, payload ));
+				char tmp = payload[i]; 
+				payload[i] = 0;
+				GF_LOG(GF_LOG_WARNING, GF_LOG_ROUTE, ("[ROUTE] Service %d unrecognized header entity in package:\n%s\n", s->service_id, payload));
+				payload[i] = tmp;
 			}
+			payload += i;
+		}
+		if(!payload[0]) {
+			GF_LOG(GF_LOG_ERROR, GF_LOG_ROUTE, ("[ROUTE] Service %d end of package has been prematurely reached\n", s->service_id));
+			return GF_NON_COMPLIANT_BITSTREAM;
 		}
 		payload += 4;
 		content = boundary ? strstr(payload, "\r\n--") : strstr(payload, "\r\n\r\n");
@@ -1497,7 +1534,7 @@ static GF_Err gf_route_dmx_process_service(GF_ROUTEDmx *routedmx, GF_ROUTEServic
 	}
 
 	if (e != GF_OK) return e;
-	assert(nb_read);
+	gf_assert(nb_read);
 
 	routedmx->nb_packets++;
 	routedmx->total_bytes_recv += nb_read;
@@ -1669,7 +1706,7 @@ static GF_Err gf_route_dmx_process_service(GF_ROUTEDmx *routedmx, GF_ROUTEServic
 	start_offset = gf_bs_read_u32(routedmx->bs);
 	pos = (u32) gf_bs_get_position(routedmx->bs);
 
-	GF_LOG(GF_LOG_DEBUG, GF_LOG_ROUTE, ("[ROUTE] Service %d : LCT packet TSI %u TOI %u size %d startOffset %u TOL "LLU"\n", s->service_id, tsi, toi, nb_read-pos, start_offset, tol_size));
+	GF_LOG(GF_LOG_DEBUG, GF_LOG_ROUTE, ("[ROUTE] Service %d : LCT packet TSI %u TOI %u size %d startOffset %u TOL "LLU" (PckNum %d)\n", s->service_id, tsi, toi, nb_read-pos, start_offset, tol_size, routedmx->nb_packets));
 
 	e = gf_route_service_gather_object(routedmx, s, tsi, toi, start_offset, routedmx->buffer + pos, nb_read-pos, (u32) tol_size, B, in_order, rlct, &gather_object);
 
@@ -1741,7 +1778,7 @@ static GF_Err gf_route_dmx_process_lls(GF_ROUTEDmx *routedmx)
 		return GF_OK;
 	}
 
-	e = gf_gz_decompress_payload(&routedmx->buffer[4], read-4, &routedmx->unz_buffer, &raw_size);
+	e = gf_gz_decompress_payload_ex(&routedmx->buffer[4], read-4, &routedmx->unz_buffer, &raw_size, GF_TRUE);
 	if (e) {
 		GF_LOG(GF_LOG_ERROR, GF_LOG_ROUTE, ("[ROUTE] Failed to decompress %s table: %s\n", name, gf_error_to_string(e) ));
 		return e;

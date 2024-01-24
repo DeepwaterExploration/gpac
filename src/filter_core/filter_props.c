@@ -101,7 +101,7 @@ GF_PropertyValue gf_props_parse_value(u32 type, const char *name, const char *va
 	unit_sep = NULL;
 	if (value) {
 		u32 len = (u32) strlen(value);
-		unit_sep = len ? strrchr("kKgGmMsS", value[len-1]) : NULL;
+		unit_sep = len ? strchr("SsMmGgKk", value[len-1]) : NULL;
 		if (unit_sep) {
 			u8 unit_char = unit_sep[0];
 			if ((unit_char=='k') || (unit_char=='K')) unit = 1000;
@@ -463,13 +463,13 @@ GF_PropertyValue gf_props_parse_value(u32 type, const char *name, const char *va
 				p.value.data.size = gf_base64_decode((u8 *)b64, size, p.value.data.ptr, size);
 				if (!p.value.data.size) {
 					GF_LOG(GF_LOG_ERROR, GF_LOG_FILTER, ("Failed to decode base64 value %s\n", value, name));
-					p.type=GF_PROP_FORBIDEN;
+					p.type=GF_PROP_FORBIDDEN;
 				}
 				p.value.data.ptr[p.value.data.size] = 0;
 			} else {
 				GF_LOG(GF_LOG_ERROR, GF_LOG_FILTER, ("Failed to allocate memory for decoding base64 value %s\n", value, name));
 				p.value.data.size = 0;
-				p.type=GF_PROP_FORBIDEN;
+				p.type=GF_PROP_FORBIDDEN;
 			}
 		} else {
 			p.value.data.size = (u32) strlen(value);
@@ -596,7 +596,7 @@ GF_PropertyValue gf_props_parse_value(u32 type, const char *name, const char *va
 		}
 	}
 		break;
-	case GF_PROP_FORBIDEN:
+	case GF_PROP_FORBIDDEN:
 	default:
 		if (gf_props_type_is_enum(type)) {
 			p.type = type;
@@ -604,7 +604,7 @@ GF_PropertyValue gf_props_parse_value(u32 type, const char *name, const char *va
 			break;
 		}
 		GF_LOG(GF_LOG_ERROR, GF_LOG_FILTER, ("Forbidden property type %d for arg %s - ignoring\n", type, name));
-		p.type=GF_PROP_FORBIDEN;
+		p.type=GF_PROP_FORBIDDEN;
 		break;
 	}
 //	if (unit_sep) unit_sep[0] = unit_char;
@@ -680,6 +680,9 @@ Bool gf_props_equal_internal(const GF_PropertyValue *p1, const GF_PropertyValue 
 			if (!strcmp(p1->value.string, "*")) return GF_TRUE;
 			if (!strcmp(p2->value.string, "*")) return GF_TRUE;
 		}
+		if (!strcmp(p1->value.string, p2->value.string))
+			return GF_TRUE;
+
 		if (strchr(p2->value.string, '|')) {
 			u32 len = (u32) strlen(p1->value.string);
 			char *cur = p2->value.string;
@@ -704,8 +707,7 @@ Bool gf_props_equal_internal(const GF_PropertyValue *p1, const GF_PropertyValue 
 			}
 			return GF_FALSE;
 		}
-		assert(strchr(p1->value.string, '|')==NULL);
-		return !strcmp(p1->value.string, p2->value.string) ? GF_TRUE : GF_FALSE;
+		return GF_FALSE;
 
 	case GF_PROP_DATA:
 	case GF_PROP_DATA_NO_COPY:
@@ -800,18 +802,19 @@ GF_PropertyMap * gf_props_new(GF_Filter *filter)
 	if (!map) {
 		GF_SAFEALLOC(map, GF_PropertyMap);
 		if (!map) return NULL;
-		
+
 		map->session = filter->session;
 #if GF_PROPS_HASHTABLE_SIZE
 #else
 		map->properties = gf_list_new();
 #endif
 	}
-	assert(!map->reference_count);
+	gf_assert(!map->reference_count);
 	map->reference_count = 1;
 	return map;
 }
 
+GF_EXPORT
 void gf_props_reset_single(GF_PropertyValue *p)
 {
 	if (p->type==GF_PROP_STRING) {
@@ -842,7 +845,7 @@ void gf_props_reset_single(GF_PropertyValue *p)
 }
 void gf_props_del_property(GF_PropertyEntry *it)
 {
-	assert(it->reference_count);
+	gf_assert(it->reference_count);
 	if (safe_int_dec(&it->reference_count) == 0 ) {
 		if (it->pname && it->name_alloc)
 			gf_free(it->pname);
@@ -854,7 +857,7 @@ void gf_props_del_property(GF_PropertyEntry *it)
 			it->prop.value.string = NULL;
 		}
 		else if (it->prop.type==GF_PROP_DATA) {
-			assert(it->alloc_size);
+			gf_assert(it->alloc_size);
 			//DATA props are collected at session level for future reuse
 		}
 		//string list are destroyed
@@ -877,7 +880,7 @@ void gf_props_del_property(GF_PropertyEntry *it)
 		}
 		it->prop.value.data.size = 0;
 		if (it->alloc_size) {
-			assert(it->prop.type==GF_PROP_DATA);
+			gf_assert(it->prop.type==GF_PROP_DATA);
 			if (gf_fq_res_add(it->session->prop_maps_entry_data_alloc_reservoir, it)) {
 				if (it->prop.value.data.ptr) gf_free(it->prop.value.data.ptr);
 				gf_free(it);
@@ -926,7 +929,7 @@ void gf_props_reset(GF_PropertyMap *prop)
 
 void gf_props_del(GF_PropertyMap *map)
 {
-	assert(!map->pckrefs_reference_count || !map->reference_count);
+	gf_assert(!map->pckrefs_reference_count || !map->reference_count);
 	//we still have a ref
 	if (map->pckrefs_reference_count || map->reference_count) return;
 
@@ -1011,13 +1014,13 @@ static GF_Err gf_props_assign_value(GF_PropertyEntry *prop, const GF_PropertyVal
 				prop->alloc_size = 0;
 				return GF_OUT_OF_MEM;
 			}
-			assert(prop->alloc_size);
+			gf_assert(prop->alloc_size);
 		}
 		memcpy(prop->prop.value.data.ptr, value->value.data.ptr, value->value.data.size);
 	} else if (prop->prop.type == GF_PROP_DATA_NO_COPY) {
 		prop->prop.type = GF_PROP_DATA;
 		prop->alloc_size = value->value.data.size;
-		assert(prop->alloc_size);
+		gf_assert(prop->alloc_size);
 	}
 	//use uint_list as base type for list
 	else if ((prop->prop.type == GF_PROP_UINT_LIST) || (prop->prop.type == GF_PROP_4CC_LIST) || (prop->prop.type == GF_PROP_SINT_LIST) || (prop->prop.type == GF_PROP_VEC2I_LIST)) {
@@ -1072,7 +1075,7 @@ GF_Err gf_props_insert_property(GF_PropertyMap *map, u32 hash, u32 p4cc, const c
 			for (i=0; i<count; i++) {
 				GF_PropertyEntry *prop_c = gf_list_get(map->hash_table[hash], i);
 				GF_LOG(GF_LOG_DEBUG, GF_LOG_FILTER, ("\t%s\n\n", prop_c->pname ? prop_c->pname : gf_4cc_to_str(prop_c->p4cc)  ));
-				assert(!prop_c->p4cc || (prop_c->p4cc != p4cc));
+				gf_assert(!prop_c->p4cc || (prop_c->p4cc != p4cc));
 			}
 		}
 	}
@@ -1209,7 +1212,7 @@ GF_Err gf_props_merge_property(GF_PropertyMap *dst_props, GF_PropertyMap *src_pr
 			count = gf_list_count(list);
 			for (i=0; i<count; i++) {
 				GF_PropertyEntry *prop = gf_list_get(list, i);
-				assert(prop->reference_count);
+				gf_assert(prop->reference_count);
 				if (!filter_prop || filter_prop(cbk, prop->p4cc, prop->pname, &prop->prop)) {
 					safe_int_inc(&prop->reference_count);
 
@@ -1239,7 +1242,7 @@ const GF_PropertyValue *gf_props_enum_property(GF_PropertyMap *props, u32 *io_id
 	u32 i, nb_items = 0;
 #endif
 	u32 idx, count;
-	
+
 	const GF_PropertyEntry *pe;
 	if (!io_idx) return NULL;
 
@@ -1358,7 +1361,7 @@ GF_PropType gf_props_parse_type(const char *name)
 		if (!strcmp(PropTypes[i].name, name)) return PropTypes[i].type;
 	}
 	GF_LOG(GF_LOG_ERROR, GF_LOG_FILTER, ("Unknown property type %s\n", name));
-	return GF_PROP_FORBIDEN;
+	return GF_PROP_FORBIDDEN;
 }
 
 #ifndef GPAC_DISABLE_DOC
@@ -1563,6 +1566,7 @@ GF_BuiltInProperty GF_BuiltInProps [] =
 	DEC_PROP_F( GF_PROP_PID_CLAMP_DUR, "ClampDur", "Max media duration to process from PID in DASH mode", GF_PROP_FRACTION64, GF_PROP_FLAG_GSF_REM),
 	DEC_PROP_F( GF_PROP_PID_HLS_PLAYLIST, "HLSPL", "Name of the HLS variant playlist for this media", GF_PROP_STRING, GF_PROP_FLAG_GSF_REM),
 	DEC_PROP_F( GF_PROP_PID_HLS_GROUPID, "HLSGroup", "Name of HLS Group of a stream", GF_PROP_STRING, GF_PROP_FLAG_GSF_REM),
+	DEC_PROP_F( GF_PROP_PID_HLS_FORCE_INF, "HLSForce", "Force writing EXT-X-STREAM-INF if stream is in a rendition group, value is the name of associated groups (can be empty)", GF_PROP_STRING, GF_PROP_FLAG_GSF_REM),
 	DEC_PROP_F( GF_PROP_PID_HLS_EXT_MASTER, "HLSMExt", "List of extensions to add to the master playlist for this PID", GF_PROP_STRING_LIST, GF_PROP_FLAG_GSF_REM),
 	DEC_PROP_F( GF_PROP_PID_HLS_EXT_VARIANT, "HLSVExt", "List of extensions to add to the variant playlist for this PID", GF_PROP_STRING_LIST, GF_PROP_FLAG_GSF_REM),
 	DEC_PROP_F( GF_PROP_PID_DASH_CUE, "DCue", "Name of a cue list file for this PID - see dasher help", GF_PROP_STRING, GF_PROP_FLAG_GSF_REM),
@@ -1727,7 +1731,7 @@ u32 gf_props_4cc_get_type(u32 prop_4cc)
 	for (i=0; i<gf_num_props; i++) {
 		if (GF_BuiltInProps[i].type==prop_4cc) return GF_BuiltInProps[i].data_type;
 	}
-	return GF_PROP_FORBIDEN;
+	return GF_PROP_FORBIDDEN;
 }
 
 Bool gf_props_4cc_check_props()
@@ -1917,8 +1921,8 @@ const char *gf_props_dump_val(const GF_PropertyValue *att, char dump[GF_PROP_DUM
 		}
 		return dump;
 	}
-	case GF_PROP_FORBIDEN:
-		sprintf(dump, "forbiden");
+	case GF_PROP_FORBIDDEN:
+		sprintf(dump, "forbidden");
 		break;
 	case GF_PROP_LAST_DEFINED:
 		sprintf(dump, "lastDefined");
@@ -2023,4 +2027,3 @@ GF_Err gf_prop_matrix_decompose(const GF_PropertyValue *p, u32 *flip_mode, u32 *
 	}
 	return GF_OK;
 }
-

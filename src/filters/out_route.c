@@ -2,7 +2,7 @@
  *			GPAC - Multimedia Framework C SDK
  *
  *			Authors: Jean Le Feuvre
- *			Copyright (c) Telecom ParisTech 2020-2022
+ *			Copyright (c) Telecom ParisTech 2020-2023
  *					All rights reserved
  *
  *  This file is part of GPAC / ROUTE output filter
@@ -43,7 +43,7 @@ typedef struct
 {
 	char *dst, *ext, *mime, *ifce, *ip;
 	u32 carousel, first_port, bsid, mtu, splitlct, ttl, brinc, runfor;
-	Bool korean, llmode, noreg;
+	Bool korean, llmode, noreg, nozip;
 
 	GF_FilterCapability in_caps[2];
 	char szExt[10];
@@ -172,7 +172,7 @@ typedef struct
 } ROUTEPid;
 
 
-ROUTELCT *route_create_lct_channel(GF_ROUTEOutCtx *ctx, const char *ip, u32 port, GF_Err *e)
+ROUTELCT *route_create_lct_channel(GF_Filter *filter, GF_ROUTEOutCtx *ctx, const char *ip, u32 port, GF_Err *e)
 {
 	*e = GF_OUT_OF_MEM;
 	ROUTELCT *rlct;
@@ -189,7 +189,7 @@ ROUTELCT *route_create_lct_channel(GF_ROUTEOutCtx *ctx, const char *ip, u32 port
 	}
 
 	if (rlct->ip) {
-		rlct->sock = gf_sk_new(GF_SOCK_TYPE_UDP);
+		rlct->sock = gf_sk_new_ex(GF_SOCK_TYPE_UDP, gf_filter_get_netcap_id(filter) );
 		if (rlct->sock) {
 			*e = gf_sk_setup_multicast(rlct->sock, rlct->ip, rlct->port, ctx->ttl, GF_FALSE, ctx->ifce);
 			if (*e) {
@@ -207,7 +207,7 @@ fail:
 	return NULL;
 }
 
-ROUTEService *routeout_create_service(GF_ROUTEOutCtx *ctx, u32 service_id, const char *ip, u32 port, GF_Err *e)
+ROUTEService *routeout_create_service(GF_Filter *filter, GF_ROUTEOutCtx *ctx, u32 service_id, const char *ip, u32 port, GF_Err *e)
 {
 	ROUTEService *rserv;
 	ROUTELCT *rlct = NULL;
@@ -215,7 +215,7 @@ ROUTEService *routeout_create_service(GF_ROUTEOutCtx *ctx, u32 service_id, const
 	GF_SAFEALLOC(rserv, ROUTEService);
 	if (!rserv) return NULL;
 
-	rlct = route_create_lct_channel(ctx, ip, port, e);
+	rlct = route_create_lct_channel(filter, ctx, ip, port, e);
 	if (!rlct) {
 		gf_free(rserv);
 		return NULL;
@@ -333,6 +333,14 @@ static GF_Err routeout_configure_pid(GF_Filter *filter, GF_FilterPid *pid, Bool 
 		else if (!rpid->manifest_type) {
 			p = gf_filter_pid_get_property(rpid->pid, GF_PROP_PID_TEMPLATE);
 			if (p && p->value.string) {
+				char *sep1 = strstr(p->value.string, "$Number");
+				char *sep2 = strstr(p->value.string, "$Time");
+				if (sep1 && sep2) {
+					GF_LOG(GF_LOG_ERROR, GF_LOG_ROUTE, ("[ROUTE] DASH Template is %s but ROUTE cannot use both Time and Number !\n", p->value.string));
+					rpid->route->is_done = GF_TRUE;
+					return GF_BAD_PARAM;
+				}
+
 				if (!rpid->template || strcmp(rpid->template, p->value.string)) {
 					if (rpid->template) gf_free(rpid->template);
 					rpid->template = gf_strdup(p->value.string);
@@ -370,8 +378,7 @@ static GF_Err routeout_configure_pid(GF_Filter *filter, GF_FilterPid *pid, Bool 
 
 	manifest_type = 0;
 	p = gf_filter_pid_get_property(pid, GF_PROP_PID_IS_MANIFEST);
-        if (p)
-                manifest_type = p->value.uint;
+	if (p) manifest_type = p->value.uint;
 
 	if (manifest_type) {
 		p = gf_filter_pid_get_property(pid, GF_PROP_PID_PREMUX_STREAM_TYPE);
@@ -405,7 +412,7 @@ static GF_Err routeout_configure_pid(GF_Filter *filter, GF_FilterPid *pid, Bool 
 			else ctx->first_port++;
 		}
 
-		rserv = routeout_create_service(ctx, service_id, service_ip, port, &e);
+		rserv = routeout_create_service(filter, ctx, service_id, service_ip, port, &e);
 		if (!rserv) return e;
 		rserv->dash_mode = pid_dash_mode;
 	}
@@ -465,9 +472,16 @@ static GF_Err routeout_configure_pid(GF_Filter *filter, GF_FilterPid *pid, Bool 
 
 	if (!rpid->manifest_type && !rpid->raw_file) {
 		p = gf_filter_pid_get_property(rpid->pid, GF_PROP_PID_TEMPLATE);
-		if (p && p->value.string) rpid->template = gf_strdup(p->value.string);
-
-		else {
+		if (p && p->value.string) {
+			char *sep1 = strstr(p->value.string, "$Number");
+			char *sep2 = strstr(p->value.string, "$Time");
+			if (sep1 && sep2) {
+				GF_LOG(GF_LOG_ERROR, GF_LOG_ROUTE, ("[ROUTE] DASH Template is %s but ROUTE cannot use both Time and Number !\n", p->value.string));
+				gf_filter_abort(filter);
+				return GF_BAD_PARAM;
+			}
+			rpid->template = gf_strdup(p->value.string);
+		} else {
 			GF_LOG(GF_LOG_WARNING, GF_LOG_ROUTE, ("[ROUTE] Segment file PID detected but no template assigned, assuming raw file upload!\n"));
 			rpid->raw_file = GF_TRUE;
 		}
@@ -514,7 +528,7 @@ static GF_Err routeout_configure_pid(GF_Filter *filter, GF_FilterPid *pid, Bool 
 			GF_Err e;
 			rserv->first_port++;
 			ctx->first_port++;
-			rpid->rlct = route_create_lct_channel(ctx, NULL, rserv->first_port, &e);
+			rpid->rlct = route_create_lct_channel(filter, ctx, NULL, rserv->first_port, &e);
 			if (e) return e;
 			if (rpid->rlct) {
 				gf_list_add(rserv->rlcts, rpid->rlct);
@@ -623,7 +637,7 @@ static GF_Err routeout_initialize(GF_Filter *filter)
 	ctx->services = gf_list_new();
 
 	if (is_atsc) {
-		ctx->sock_atsc_lls = gf_sk_new(GF_SOCK_TYPE_UDP);
+		ctx->sock_atsc_lls = gf_sk_new_ex(GF_SOCK_TYPE_UDP, gf_filter_get_netcap_id(filter) );
 		gf_sk_setup_multicast(ctx->sock_atsc_lls, GF_ATSC_MCAST_ADDR, GF_ATSC_MCAST_PORT, 0, GF_FALSE, ctx->ifce);
 	}
 
@@ -754,13 +768,15 @@ static GF_Err routeout_check_service_updates(GF_ROUTEOutCtx *ctx, ROUTEService *
 			GF_FilterPacket *pck = gf_filter_pid_get_packet(rpid->pid);
 			if (!pck) break;
 
+			file_name = ctx->dst;
 			p = gf_filter_pck_get_property(pck, GF_PROP_PCK_FILENAME);
-			if (!p) p = gf_filter_pid_get_property(rpid->pid, GF_PROP_PID_URL);
-
-			if (p)
+			if (p) {
 				file_name = p->value.string;
-			else
-				file_name = ctx->dst;
+			} else {
+				p = gf_filter_pid_get_property(rpid->pid, GF_PROP_PID_URL);
+				if (p)
+					file_name = gf_file_basename(p->value.string);
+			}
 
 			if (file_name) {
 				proto = strstr(file_name, "://");
@@ -874,7 +890,7 @@ static GF_Err routeout_check_service_updates(GF_ROUTEOutCtx *ctx, ROUTEService *
 
 	//not ready, waiting for manifest
 	if (!serv->manifest && !nb_raw_files) {
-		return GF_OK;
+		return GF_NOT_READY;
 	}
 	//already setup and no changes
 	else if (!serv->wait_for_inputs) {
@@ -883,7 +899,7 @@ static GF_Err routeout_check_service_updates(GF_ROUTEOutCtx *ctx, ROUTEService *
 	}
 	if (serv->wait_for_inputs) {
 		if (!serv->manifest) {
-			assert(nb_raw_files);
+			gf_assert(nb_raw_files);
 			serv->stsid_changed = GF_TRUE;
 		}
 		serv->wait_for_inputs = GF_FALSE;
@@ -1039,7 +1055,8 @@ static GF_Err routeout_check_service_updates(GF_ROUTEOutCtx *ctx, ROUTEService *
 		char szIP[GF_MAX_IP_NAME_LEN];
 		src_ip = ctx->ifce;
 		if (!src_ip) {
-			gf_sk_get_local_ip(rlct->sock, szIP);
+			if (gf_sk_get_local_ip(rlct->sock, szIP) != GF_OK)
+				strcpy(szIP, "127.0.0.1");
 			src_ip = szIP;
 		}
 
@@ -1080,14 +1097,25 @@ static GF_Err routeout_check_service_updates(GF_ROUTEOutCtx *ctx, ROUTEService *
 
 			p = gf_filter_pid_get_property(rpid->pid, GF_PROP_PID_TEMPLATE);
 			if (p) {
-				char *sep;
+				char *sep, *sep2, *key = "$Number";
 				strcpy(temp, p->value.string);
 				sep = strstr(temp, "$Number");
+				sep2 = strstr(temp, "$Time");
+				if (sep && sep2) {
+					gf_free(payload_text);
+					GF_LOG(GF_LOG_ERROR, GF_LOG_ROUTE, ("[ROUTE] DASH Template is %s but ROUTE cannot use both Time and Number !\n", p->value.string));
+					serv->is_done = GF_TRUE;
+					return GF_SERVICE_ERROR;
+				}
+				if (!sep) {
+					sep = sep2;
+					key = "$Time";
+				}
 				if (sep) {
 					sep[0] = 0;
 					strcat(temp, "$TOI");
-					sep = strstr(p->value.string, "$Number");
-					strcat(temp, sep + 7);
+					sep = strstr(p->value.string, key);
+					strcat(temp, sep + strlen(key));
 				}
 			}
 
@@ -1208,13 +1236,15 @@ static GF_Err routeout_check_service_updates(GF_ROUTEOutCtx *ctx, ROUTEService *
 
 	GF_LOG(GF_LOG_INFO, GF_LOG_ROUTE, ("[ROUTE] Updated Manifest+S-TSID bundle to:\n%s\n", payload_text));
 
-	//compress and store as final payload
 	if (serv->stsid_bundle) gf_free(serv->stsid_bundle);
 	serv->stsid_bundle = (u8 *) payload_text;
 	serv->stsid_bundle_size = 1 + (u32) strlen(payload_text);
-	gf_gz_compress_payload(&serv->stsid_bundle, serv->stsid_bundle_size, &serv->stsid_bundle_size);
-
-	serv->stsid_bundle_toi = 0x80000000; //compressed
+	if(!ctx->nozip) {
+		//compress and store as final payload
+		gf_gz_compress_payload_ex(&serv->stsid_bundle, serv->stsid_bundle_size, &serv->stsid_bundle_size, 0, GF_FALSE, NULL, GF_TRUE);
+		
+		serv->stsid_bundle_toi = 0x80000000; //compressed
+	}
 	if (manifest_updated) serv->stsid_bundle_toi |= (1<<18);
 	if (serv->stsid_changed) {
 		serv->stsid_bundle_toi |= (1<<17);
@@ -1295,7 +1325,7 @@ u32 routeout_lct_send(GF_ROUTEOutCtx *ctx, GF_Socket *sock, u32 tsi, u32 toi, u3
 	//start_offset
 	PUT_U32(offset_in_frame);
 
-	assert(send_payl_size+hpos <= ctx->mtu);
+	gf_assert(send_payl_size+hpos <= ctx->mtu);
 
 	GF_LOG(GF_LOG_DEBUG, GF_LOG_ROUTE, ("[ROUTE] LCT SID %u TSI %u TOI %u size %u (frag %u total %u) offset %u (%u in obj)\n", service_id, tsi, toi, send_payl_size, len, total_size, offset, offset_in_frame));
 
@@ -1403,7 +1433,7 @@ retry:
 	p = gf_filter_pck_get_property(rpid->current_pck, GF_PROP_PCK_INIT);
 	if (p && p->value.boolean) {
 		u32 crc;
-		assert(start && end);
+		gf_assert(start && end);
 		crc = gf_crc_32(rpid->pck_data, rpid->pck_size);
 		//whenever init seg changes, bump stsid version
 		if (crc != rpid->init_seg_crc) {
@@ -1427,7 +1457,7 @@ retry:
 	p = gf_filter_pck_get_property(rpid->current_pck, GF_PROP_PID_HLS_PLAYLIST);
 	if (p && p->value.string) {
 		u32 crc;
-		assert(start && end);
+		gf_assert(start && end);
 		crc = gf_crc_32(rpid->pck_data, rpid->pck_size);
 		//whenever init seg changes, bump stsid version
 		if (crc != rpid->hld_child_pl_crc) {
@@ -1475,7 +1505,7 @@ retry:
 	}
 
 	if (rpid->raw_file) {
-		assert(start && end);
+		gf_assert(start && end);
 
 		if (rpid->seg_name) gf_free(rpid->seg_name);
 		rpid->seg_name = "unknown";
@@ -1524,12 +1554,22 @@ retry:
 		rpid->seg_name = gf_strdup(rpid->seg_name);
 
 		//file num increased per packet, open new file
-		p = gf_filter_pck_get_property(rpid->current_pck, GF_PROP_PCK_FILENUM);
-		if (p)
-			rpid->current_toi = p->value.uint;
-		else {
-			GF_LOG(GF_LOG_ERROR, GF_LOG_ROUTE, ("[ROUTE] Missing filenum on segment %s, something is wrong in source chain - assuming +1 increase\n", rpid->seg_name));
-			rpid->current_toi ++;
+		p = gf_filter_pck_get_property(rpid->current_pck, GF_PROP_PCK_MPD_SEGSTART);
+		if (p) {
+			if (p->value.lfrac.num >= ROUTE_INIT_TOI) {
+				GF_LOG(GF_LOG_ERROR, GF_LOG_ROUTE, ("[ROUTE] MPD Time "LLU" greater than 32 bits, session no longer valid, aborting\n", p->value.lfrac.num));
+				rpid->route->is_done = GF_TRUE;
+				gf_filter_pid_set_discard(rpid->pid, GF_TRUE);
+			}
+			rpid->current_toi = (u32) p->value.lfrac.num;
+		} else {
+			p = gf_filter_pck_get_property(rpid->current_pck, GF_PROP_PCK_FILENUM);
+			if (p)
+				rpid->current_toi = p->value.uint;
+			else {
+				GF_LOG(GF_LOG_ERROR, GF_LOG_ROUTE, ("[ROUTE] Missing filenum on segment %s, something is wrong in source chain - assuming +1 increase\n", rpid->seg_name));
+				rpid->current_toi ++;
+			}
 		}
 		rpid->frag_idx = 0;
 		rpid->full_frame_size = end ? rpid->pck_size : 0;
@@ -1632,10 +1672,12 @@ static GF_Err routeout_process_service(GF_ROUTEOutCtx *ctx, ROUTEService *serv)
 	GF_Err e;
 
 	e = routeout_check_service_updates(ctx, serv);
+	if (e==GF_NOT_READY)
+		return GF_OK;
 
 	if (serv->stsid_bundle) {
 		u64 diff = ctx->clock - serv->last_stsid_clock;
-		if (diff >= ctx->carousel) {
+		if (!serv->last_stsid_clock || (diff >= ctx->carousel)) {
 			routeout_service_send_bundle(ctx, serv);
 			serv->last_stsid_clock = ctx->clock;
 		} else {
@@ -1893,7 +1935,7 @@ static void routeout_send_lls(GF_ROUTEOutCtx *ctx)
 		comp_size = 2*len;
 		payload = gf_malloc(sizeof(char)*(comp_size+4));
 		pay_start = payload + 4;
-		gf_gz_compress_payload_ex((u8 **) &payload_text, len, &comp_size, 0, GF_FALSE, &pay_start, GF_FALSE);
+		gf_gz_compress_payload_ex((u8 **) &payload_text, len, &comp_size, 0, GF_FALSE, &pay_start, GF_TRUE);
 		gf_free(payload_text);
 		payload_text = NULL;
 
@@ -1967,7 +2009,8 @@ static void routeout_send_lls(GF_ROUTEOutCtx *ctx)
 
 			src_ip = ctx->ifce;
 			if (!src_ip) {
-				gf_sk_get_local_ip(serv->rlct_base->sock, szIP);
+				if (gf_sk_get_local_ip(serv->rlct_base->sock, szIP)!=GF_OK)
+					strcpy(szIP, "127.0.0.1");
 				src_ip = szIP;
 			}
 			int res = snprintf(tmp, 1000, "  <BroadcastSvcSignaling slsProtocol=\"1\" slsDestinationIpAddress=\"%s\" slsDestinationUdpPort=\"%d\" slsSourceIpAddress=\"%s\"/>\n"
@@ -1985,7 +2028,7 @@ static void routeout_send_lls(GF_ROUTEOutCtx *ctx)
 		comp_size = 2*len;
 		payload = gf_malloc(sizeof(char)*(comp_size+4));
 		pay_start = payload + 4;
-		gf_gz_compress_payload_ex((u8 **) &payload_text, len, &comp_size, 0, GF_FALSE, &pay_start, GF_FALSE);
+		gf_gz_compress_payload_ex((u8 **) &payload_text, len, &comp_size, 0, GF_FALSE, &pay_start, GF_TRUE);
 		gf_free(payload_text);
 		payload_text = NULL;
 
@@ -2140,6 +2183,7 @@ static const GF_FilterArgs ROUTEOutArgs[] =
 	{ OFFS(noreg), "disable rate regulation for media segments, pushing them as fast as received", GF_PROP_BOOL, "false", NULL, GF_ARG_HINT_EXPERT},
 
 	{ OFFS(runfor), "run for the given time in ms", GF_PROP_UINT, "0", NULL, 0},
+	{ OFFS(nozip), "do not zip signaling package (STSID+manifest)", GF_PROP_BOOL, "false", NULL, 0},
 	{0}
 };
 

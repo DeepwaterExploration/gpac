@@ -219,7 +219,7 @@ static Bool get_default_install_path(char *file_path, u32 path_type)
 	}
 
 	/*we are looking for the config file path - make sure it is writable*/
-	assert(path_type == GF_PATH_CFG);
+	gf_assert(path_type == GF_PATH_CFG);
 
 	strcpy(szPath, file_path);
 	strcat(szPath, "\\gpaccfgtest.txt");
@@ -634,7 +634,7 @@ static void gf_ios_refresh_cache_directory( GF_Config *cfg, const char *file_pat
 	if (!res) return;
 
 	sep = strstr(res, ".gpac");
-	assert(sep);
+	gf_assert(sep);
 	sep[0] = 0;
 	gf_cfg_set_key(cfg, "core", "docs-dir", res);
 	if (!gf_cfg_get_key(cfg, "core", "last-dir"))
@@ -1038,7 +1038,7 @@ static GF_Config *gf_cfg_init(const char *profile)
 	if (profile && !prof_len)
 		profile = NULL;
 
-	if (profile && (strchr(profile, '/') || strchr(profile, '\\')) ) {
+	if (profile && strpbrk(profile, "/\\")) {
 		if (!gf_file_exists(profile)) {
 			GF_LOG(GF_LOG_ERROR, GF_LOG_CORE, ("[core] Config file %s does not exist\n", profile));
 			goto exit;
@@ -1410,6 +1410,31 @@ GF_GPACArg GPAC_Args[] = {
  GF_DEF_ARG("no-tls-rcfg", NULL, "disable automatic TCP to TLS reconfiguration", NULL, NULL, GF_ARG_BOOL, GF_ARG_HINT_EXPERT|GF_ARG_SUBSYS_CORE),
  GF_DEF_ARG("no-fd", NULL, "use buffered IO instead of file descriptor for read/write - this can speed up operations on small files", NULL, NULL, GF_ARG_BOOL, GF_ARG_HINT_EXPERT|GF_ARG_SUBSYS_CORE),
  GF_DEF_ARG("no-mx", NULL, "disable all mutexes, threads and semaphores (do not use if unsure about threading used)", NULL, NULL, GF_ARG_BOOL, GF_ARG_HINT_EXPERT|GF_ARG_SUBSYS_CORE),
+#ifndef GPAC_DISABLE_NETCAP
+ GF_DEF_ARG("netcap", NULL, "set packet capture and filtering rules formatted as [CFG][RULES]. Each `-netcap` argument will define a configuration\n"
+ "[CFG] is an optional comma-separated list of:\n"
+ "- id=ID: ID (string) for this configuration. If NULL, configuration will apply to all sockets not specifying a netcap ID\n"
+ "- src=F: read packets from `F`, as produced by GPAC or a pcap or pcapng file\n"
+ "- dst=F: output packets to `F` (no pcap/pcapng support), cannot be set if src is set\n"
+ "- loop[=N]: loop capture file N times, or forever if N is not set or negative\n"
+ "- nrt: disable real-time playback\n"
+ "[RULES] is an optional list of `[OPT,OPT2...]` with OPT in:\n"
+ "- m=N: set rule mode - `N` can be `r` for reception only (default), `w` for send only or `rw` for both\n"
+ "- s=N: set packet start range to `N`\n"
+ "- e=N: set packet end range to `N` (only used for `r` and `f` rules)\n"
+ "- n=N: set number of packets to drop to `N` - not set, 0 or 1 means single packet\n"
+ "- r=N: random drop one packet every `N`\n"
+ "- f=N: drop first packet every `N`\n"
+ "- p=P: local port number to filter, if not set the rule applies to all packets\n"
+ "- o=N: patch packet instead of droping (always true for TCP), replacing byte at offset `N` (0 is first byte, <0 for random)\n"
+ "- v=N: set patch byte value to `N` (hexa) or negative value for random (default)\n"
+ "\nEX -netcap=dst=dump.gpc\n"
+ "This will record packets to dump.gpc\n"
+ "\nEX -netcap=src=dump.gpc,id=NC1 -i session1.sdp:NCID=NC1 -i session2.sdp\n"
+ "This will read packets from dump.gpc only for session1.sdp and let session2.sdp use regular sockets\n"
+ "\nEX -netcap=[p=1234,s=100,n=20][r=200,s=500,o=10,v=FE]\n"
+ "This will use regular network interface and drop packets 100 to 119 on port 1234 and patch one random packet every 200 starting from packet 500, setting byte 10 to FE", NULL, NULL, GF_ARG_STRING, GF_ARG_HINT_EXPERT|GF_ARG_SUBSYS_CORE),
+#endif
 
  GF_DEF_ARG("cache", NULL, "cache directory location", NULL, NULL, GF_ARG_STRING, GF_ARG_HINT_ADVANCED|GF_ARG_SUBSYS_HTTP),
  GF_DEF_ARG("proxy-on", NULL, "enable HTTP proxy", NULL, NULL, GF_ARG_BOOL, GF_ARG_HINT_ADVANCED|GF_ARG_SUBSYS_HTTP),
@@ -2093,6 +2118,7 @@ void gf_sys_format_help(FILE *helpout, GF_SysPrintArgFlags flags, const char *fm
 			line_pos=0;
 			continue;
 		}
+		if (!line[0]) flags &= ~GF_PRINTARG_HIGHLIGHT_FIRST;
 
 		if ((line[0]=='#') && (line[1]==' ')) {
 			if (!gen_doc)
@@ -2395,7 +2421,7 @@ void gf_sys_format_help(FILE *helpout, GF_SysPrintArgFlags flags, const char *fm
 
 			if (has_token && tid==TOK_OPTLINK) {
 				char *link = strchr(line, '(');
-				assert(link);
+				gf_assert(link);
 				link++;
 				char *end_link = strchr(line, ')');
 				if (end_link) end_link[0] = 0;

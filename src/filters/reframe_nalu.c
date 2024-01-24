@@ -704,7 +704,7 @@ static void naludmx_check_dur(GF_Filter *filter, GF_NALUDmxCtx *ctx)
 
 		gf_filter_pid_set_property(ctx->opid, GF_PROP_PID_DURATION, & PROP_FRAC64(ctx->duration));
 
-		if (duration && (!gf_sys_is_test_mode() || gf_opts_get_bool("temp", "force_indexing"))) {
+		if (duration && ctx->duration.num && (!gf_sys_is_test_mode() || gf_opts_get_bool("temp", "force_indexing"))) {
 			filesize *= 8 * ctx->duration.den;
 			filesize /= ctx->duration.num;
 			ctx->bitrate = (u32) filesize;
@@ -738,7 +738,7 @@ static void naludmx_enqueue_or_dispatch(GF_NALUDmxCtx *ctx, GF_FilterPacket *n_p
 				dts = gf_filter_pck_get_dts(q_pck);
 				if (dts == GF_FILTER_NO_TS) continue;
 				poc_ts = gf_filter_pck_get_cts(q_pck);
-				assert(poc_ts != GF_FILTER_NO_TS);
+				gf_assert(poc_ts != GF_FILTER_NO_TS);
 				poc = (s32) ((s64) poc_ts - CTS_POC_OFFSET_SAFETY);
 
 				if (i) {
@@ -769,7 +769,7 @@ static void naludmx_enqueue_or_dispatch(GF_NALUDmxCtx *ctx, GF_FilterPacket *n_p
 
 				//we reused timing from source packets
 				if (!carousel_info) {
-					assert(ctx->timescale);
+					gf_assert(ctx->timescale);
 					gf_list_rem(ctx->pck_queue, 0);
 					gf_filter_pck_send(q_pck);
 					continue;
@@ -778,7 +778,7 @@ static void naludmx_enqueue_or_dispatch(GF_NALUDmxCtx *ctx, GF_FilterPacket *n_p
 
 
 				poc_ts = gf_filter_pck_get_cts(q_pck);
-				assert(poc_ts != GF_FILTER_NO_TS);
+				gf_assert(poc_ts != GF_FILTER_NO_TS);
 				poc = (s32) ((s64) poc_ts - CTS_POC_OFFSET_SAFETY);
 
 				if (patch_missing_frame) {
@@ -990,6 +990,7 @@ GF_Err naludmx_set_hevc_oinf(GF_NALUDmxCtx *ctx, u8 *max_temporal_id)
 		LHEVC_DependentLayer *dep;
 		u32 j, k;
 		if (i==MAX_LHVC_LAYERS) break;
+		if (vps->layer_id_in_nuh[i]>=MAX_LHVC_LAYERS) break;
 
 		GF_SAFEALLOC(dep, LHEVC_DependentLayer);
 		if (!dep) return GF_OUT_OF_MEM;
@@ -1162,7 +1163,7 @@ static Bool naludmx_create_hevc_decoder_config(GF_NALUDmxCtx *ctx, u8 **dsi, u32
 			/*disable frame rate scan, most bitstreams have wrong values there*/
 			if (ctx->notime && first && (!ctx->fps.num || !ctx->fps.den) && sps->has_timing_info
 				/*if detected FPS is greater than 1000, assume wrong timing info*/
-				&& (sps->time_scale / 1000 <= sps->num_units_in_tick)
+				&& sps->time_scale && (sps->time_scale / 1000 <= sps->num_units_in_tick)
 			) {
 				ctx->cur_fps.num = sps->time_scale;
 				ctx->cur_fps.den = sps->num_units_in_tick;
@@ -1317,7 +1318,8 @@ static Bool naludmx_create_vvc_decoder_config(GF_NALUDmxCtx *ctx, u8 **dsi, u32 
 				cfg->ptl_frame_only_constraint = vps->ptl[0].frame_only_constraint;
 				cfg->ptl_multilayer_enabled = vps->ptl[0].multilayer_enabled;
 
-				cfg->general_constraint_info = gf_malloc(sizeof(u8) * cfg-> num_constraint_info);
+				if (cfg->general_constraint_info) gf_free(cfg->general_constraint_info);
+				cfg->general_constraint_info = gf_malloc(sizeof(u8) * cfg->num_constraint_info);
 				if (cfg->general_constraint_info)
 					memcpy(cfg->general_constraint_info, vps->ptl[0].gci, cfg->num_constraint_info);
 
@@ -1339,7 +1341,7 @@ static Bool naludmx_create_vvc_decoder_config(GF_NALUDmxCtx *ctx, u8 **dsi, u32 
 			/*disable frame rate scan, most bitstreams have wrong values there*/
 			if (ctx->notime && first && (!ctx->fps.num || !ctx->fps.den) && sps->has_timing_info
 				/*if detected FPS is greater than 1000, assume wrong timing info*/
-				&& (sps->time_scale / 1000 <= sps->num_units_in_tick)
+				&& sps->time_scale && (sps->time_scale / 1000 <= sps->num_units_in_tick)
 			) {
 				ctx->cur_fps.num = sps->time_scale;
 				ctx->cur_fps.den = sps->num_units_in_tick;
@@ -2035,7 +2037,7 @@ static Bool naludmx_process_event(GF_Filter *filter, const GF_FilterEvent *evt)
 
 static GFINLINE void naludmx_update_time(GF_NALUDmxCtx *ctx)
 {
-	assert(ctx->cur_fps.num);
+	gf_assert(ctx->cur_fps.num);
 
 	if (!ctx->notime) {
 		//very first frame, no dts diff, assume 3000/90k. It should only hurt if we have several frames packet in the first packet sent
@@ -2043,7 +2045,7 @@ static GFINLINE void naludmx_update_time(GF_NALUDmxCtx *ctx)
 		ctx->cts += dts_inc;
 		ctx->dts += dts_inc;
 	} else {
-		assert(ctx->cur_fps.den);
+		gf_assert(ctx->cur_fps.den);
 		ctx->cts += ctx->cur_fps.den;
 		ctx->dts += ctx->cur_fps.den;
 	}
@@ -2076,7 +2078,7 @@ static void naludmx_queue_param_set(GF_NALUDmxCtx *ctx, char *data, u32 size, u3
 			ctx->valid_ps_flags |= 1<<1;
 			break;
 		default:
-			assert(0);
+			gf_assert(0);
 			return;
 		}
 	} else if (ctx->codecid==GF_CODECID_VVC) {
@@ -2108,7 +2110,7 @@ static void naludmx_queue_param_set(GF_NALUDmxCtx *ctx, char *data, u32 size, u3
 			list = ctx->vvc_aps_pre;
 			break;
 		default:
-			assert(0);
+			gf_assert(0);
 			return;
 		}
 	} else {
@@ -2129,7 +2131,7 @@ static void naludmx_queue_param_set(GF_NALUDmxCtx *ctx, char *data, u32 size, u3
 			list = ctx->sps_ext;
 			break;
 		default:
-			assert(0);
+			gf_assert(0);
 			return;
 		}
 	}
@@ -2245,9 +2247,9 @@ static void naludmx_finalize_au_flags(GF_NALUDmxCtx *ctx)
 	ts = gf_filter_pck_get_cts(ctx->first_pck_in_au);
 	if (ts == GF_FILTER_NO_TS) {
 		/*we store the POC (last POC minus the poc shift) as the CTS offset and re-update the CTS when dispatching*/
-		assert(ctx->last_poc >= ctx->poc_shift);
+		gf_assert(ctx->last_poc >= ctx->poc_shift);
 		gf_filter_pck_set_cts(ctx->first_pck_in_au, CTS_POC_OFFSET_SAFETY + ctx->last_poc - ctx->poc_shift);
-		//we use the carousel flag temporarly to indicate the cts must be recomputed
+		//we use the carousel flag temporarily to indicate the cts must be recomputed
 		gf_filter_pck_set_carousel_version(ctx->first_pck_in_au, 1);
 	}
 
@@ -2347,7 +2349,7 @@ GF_FilterPacket *naludmx_start_nalu(GF_NALUDmxCtx *ctx, u32 nal_size, Bool skip_
 			//we don't set the CTS, it will be set once we detect frame end
 			gf_filter_pck_set_dts(dst_pck, ctx->dts);
 		}
-		//we use the carousel flag temporarly to indicate the cts must be recomputed
+		//we use the carousel flag temporarily to indicate the cts must be recomputed
 		gf_filter_pck_set_carousel_version(dst_pck, ctx->notime ? 1 : 0);
 
 		gf_filter_pck_set_duration(dst_pck, ctx->pck_duration ? ctx->pck_duration : ctx->cur_fps.den);
@@ -2378,7 +2380,7 @@ void naludmx_add_subsample(GF_NALUDmxCtx *ctx, u32 subs_size, u8 subs_priority, 
 		ctx->subsamp_buffer_alloc = ctx->subsamp_buffer_size+14;
 		ctx->subsamp_buffer = gf_realloc(ctx->subsamp_buffer, ctx->subsamp_buffer_alloc);
 	}
-	assert(ctx->subsamp_buffer);
+	gf_assert(ctx->subsamp_buffer);
 	gf_bs_reassign_buffer(ctx->bs_w, ctx->subsamp_buffer + ctx->subsamp_buffer_size, 14);
 	gf_bs_write_u32(ctx->bs_w, 0); //flags
 	gf_bs_write_u32(ctx->bs_w, subs_size + ctx->nal_length);
@@ -2898,7 +2900,7 @@ static s32 naludmx_parse_nal_avc(GF_NALUDmxCtx *ctx, char *data, u32 size, u32 n
 			}
 		}
 		*is_slice = GF_TRUE;
-		//we disable temporal scalability when parsing mvc - never used and many encoders screw up POC in enhancemen
+		//we disable temporal scalability when parsing mvc - never used and many encoders screw up POC in enhancement
 		if (ctx->is_mvc && (res>=0)) {
 			res=0;
 			ctx->avc_state->s_info.poc = ctx->last_poc;
@@ -2975,7 +2977,7 @@ static void naldmx_switch_timestamps(GF_NALUDmxCtx *ctx, GF_FilterPacket *pck)
 					diff -= ctx->prev_dts;
 					if (!ctx->cur_fps.den) {
 						ctx->cur_fps.den = (u32) diff;
-						//we initialized wiith 3000, patch back
+						//we initialized with 3000, patch back
 						if (ctx->dts && (ctx->dts!=ts)) {
 							ctx->dts -= 3000;
 							ctx->dts += diff;
@@ -2984,8 +2986,13 @@ static void naldmx_switch_timestamps(GF_NALUDmxCtx *ctx, GF_FilterPacket *pck)
 							ctx->prev_cts -= 3000;
 							ctx->prev_cts += diff;
 						}
-					} else if (ctx->cur_fps.den > diff)
+						if (!gf_filter_pid_get_property(ctx->ipid, GF_PROP_PID_FPS))
+							gf_filter_pid_set_property(ctx->opid, GF_PROP_PID_FPS, & PROP_FRAC(ctx->cur_fps));
+					} else if (ctx->cur_fps.den > diff) {
 						ctx->cur_fps.den = (u32) diff;
+						if (!gf_filter_pid_get_property(ctx->ipid, GF_PROP_PID_FPS))
+							gf_filter_pid_set_property(ctx->opid, GF_PROP_PID_FPS, & PROP_FRAC(ctx->cur_fps));
+					}
 
 					ctx->prev_dts = ts;
 				}
@@ -3139,7 +3146,7 @@ restart:
 		if (ctx->opid && gf_filter_pid_would_block(ctx->opid))
 			return GF_OK;
 
-		assert(ctx->resume_from < ctx->nal_store_size);
+		gf_assert(ctx->resume_from < ctx->nal_store_size);
 		start += ctx->resume_from;
 		remain -= ctx->resume_from;
 		ctx->resume_from = 0;
@@ -3161,7 +3168,7 @@ naldmx_flush:
 		gf_bs_reassign_buffer(ctx->bs_r, start, remain);
 	}
 
-    assert(remain>=0);
+    gf_assert(remain>=0);
 
 	while (remain) {
 		u8 *pck_data;
@@ -3206,11 +3213,11 @@ naldmx_flush:
 			break;
 		}
 
-		assert(current>=0);
+		gf_assert(current>=0);
 
 		//unknown data before start of nal, may happen when tuning in, discard
 		if (current) {
-			assert(remain>=current);
+			gf_assert(remain>=current);
 			start += current;
 			remain -= current;
 			current = 0;
@@ -3266,7 +3273,7 @@ naldmx_flush:
 					u8 layer_id = nal_data[0] & 1;
 					layer_id<<=5;
 					layer_id |= (nal_data[1] & 0xF8) >> 3;
-					u8 temporal_id = nal_data[2] & 0x7;
+					u8 temporal_id = nal_data[1] & 0x7;
 					if (ctx->last_layer_id < layer_id)
 						force_au_flush = GF_FALSE;
 					else if (ctx->last_layer_id == layer_id) {
@@ -3373,7 +3380,7 @@ naldmx_flush:
 
 		if (skip_nal) {
 			nal_size += sc_size;
-			assert((u32) remain >= nal_size);
+			gf_assert((u32) remain >= nal_size);
 			start += nal_size;
 			remain -= nal_size;
 			naldmx_check_timestamp_switch(ctx, &nalu_store_before, nal_size, &drop_packet, pck);
@@ -3384,7 +3391,7 @@ naldmx_flush:
 
 		if (!ctx->is_playing) {
 			ctx->resume_from = (u32) (start - ctx->nal_store);
-            assert(ctx->resume_from<=ctx->nal_store_size);
+            gf_assert(ctx->resume_from<=ctx->nal_store_size);
 			GF_LOG(GF_LOG_DEBUG, GF_LOG_MEDIA, ("[%s] not yet playing\n", ctx->log_name));
 
 			if (drop_packet)
@@ -3412,7 +3419,7 @@ naldmx_flush:
 				GF_LOG(GF_LOG_ERROR, GF_LOG_MEDIA, ("[%s] Error parsing NAL Unit %d (size %d type %d frame %d last POC %d) - skipping\n", ctx->log_name, ctx->nb_nalus, nal_size, nal_type, ctx->nb_frames, ctx->last_poc));
 			}
 			nal_size += sc_size;
-			assert((u32) remain >= nal_size);
+			gf_assert((u32) remain >= nal_size);
 			start += nal_size;
 			remain -= nal_size;
 			naldmx_check_timestamp_switch(ctx, &nalu_store_before, nal_size, &drop_packet, pck);
@@ -3580,7 +3587,7 @@ naldmx_flush:
 					}
 					memcpy(ctx->svc_prefix_buffer, start+sc_size, ctx->svc_prefix_buffer_size);
 
-					assert( (u32) remain >= sc_size + nal_size);
+					gf_assert( (u32) remain >= sc_size + nal_size);
 					start += sc_size + nal_size;
 					remain -= sc_size + nal_size;
 					continue;
@@ -3688,7 +3695,7 @@ naldmx_flush:
 				for (i=0; i<count; i++) {
 					u64 dts, cts;
 					GF_FilterPacket *q_pck = gf_list_get(ctx->pck_queue, i);
-					assert(q_pck);
+					gf_assert(q_pck);
 					dts = gf_filter_pck_get_dts(q_pck);
 					if (dts == GF_FILTER_NO_TS) continue;
 					cts = gf_filter_pck_get_cts(q_pck);
@@ -3704,7 +3711,16 @@ naldmx_flush:
 
 			/*if #pics, compute smallest POC increase*/
 			if (slice_poc != ctx->last_poc) {
-				s32 pdiff = ABS(ctx->last_poc - slice_poc);
+//				s32 pdiff = ABS(ctx->last_poc - slice_poc);
+				s64 pdiff = ctx->last_poc;
+				pdiff -= slice_poc;
+				if (pdiff<0) pdiff=-pdiff;
+				if (pdiff>GF_INT_MAX) {
+					GF_LOG(GF_LOG_ERROR, GF_LOG_MEDIA, ("[%s] POC diff overflow %d vs last %d, reseting poc counter - timing will likely be corrupted\n", ctx->log_name, slice_poc, ctx->last_poc));
+					pdiff=0;
+					slice_poc=ctx->last_poc;
+					ctx->poc_shift=slice_poc;
+				}
 
 				if ((slice_poc < 0) && !ctx->last_poc)
 					ctx->poc_diff = 0;
@@ -3716,7 +3732,13 @@ naldmx_flush:
 				if (!ctx->poc_diff || (ctx->poc_diff > (s32) pdiff ) ) {
 					ctx->poc_diff = pdiff;
 					ctx->poc_probe_done = GF_FALSE;
-				} else if (first_in_au) {
+				}
+				//first slice (new au) with poc greater than last poc, good to go
+				//We must wait for poc increase for IDR with leading pics (cf #2716):
+				//POCs: 23(IDR) 15 7 3 1 0 2
+				//diffs: 23 8 8 7 4 2 1 1
+				//we would use 8 instead of 1
+				else if (first_in_au && (ctx->last_poc<slice_poc)) {
 					//second frame with the same poc diff, we should be able to properly recompute CTSs
 					ctx->poc_probe_done = GF_TRUE;
 				}
@@ -3861,8 +3883,8 @@ naldmx_flush:
 		//a huge number of frames in a single call
 		if (remain && gf_filter_pid_would_block(ctx->opid)) {
 			ctx->resume_from = (u32) (start - ctx->nal_store);
-			assert(ctx->resume_from <= ctx->nal_store_size);
-			assert(ctx->resume_from == ctx->nal_store_size - remain);
+			gf_assert(ctx->resume_from <= ctx->nal_store_size);
+			gf_assert(ctx->resume_from == ctx->nal_store_size - remain);
 			if (drop_packet)
 				gf_filter_pid_drop_packet(ctx->ipid);
 			return GF_OK;
@@ -3874,7 +3896,7 @@ naldmx_flush:
 			GF_LOG(GF_LOG_WARNING, GF_LOG_MEDIA, ("[%s] Incomplete last NAL and eos, discarding\n", ctx->log_name));
 			remain = 0;
 		} else {
-			assert((u32) remain<=ctx->nal_store_size);
+			gf_assert((u32) remain<=ctx->nal_store_size);
 			memmove(ctx->nal_store, start, remain);
 		}
 	}
@@ -4296,4 +4318,3 @@ const GF_FilterRegister *rfnalu_register(GF_FilterSession *session)
 	return NULL;
 }
 #endif //#if !defined(GPAC_DISABLE_AV_PARSERS) && !defined(GPAC_DISABLE_RFNALU)
-

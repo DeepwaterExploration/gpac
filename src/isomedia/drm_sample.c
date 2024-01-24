@@ -1211,7 +1211,7 @@ GF_Err gf_isom_cenc_merge_saiz_saio(GF_SampleEncryptionBox *senc, GF_SampleTable
 {
 	u32 i;
 	Bool is_first_saiz = GF_FALSE;
-	assert(stbl);
+	gf_assert(stbl);
 
 	if (!senc->cenc_saiz) {
 		senc->cenc_saiz = (GF_SampleAuxiliaryInfoSizeBox *) gf_isom_box_new_parent(&stbl->child_boxes, GF_ISOM_BOX_TYPE_SAIZ);
@@ -1419,6 +1419,9 @@ Bool gf_isom_cenc_has_saiz_saio_full(GF_SampleTableBox *stbl, void *_traf, u32 s
 			if (sinf && sinf->scheme_type) {
 				saiz_aux_info_type = sinf_fmt = sinf->scheme_type->scheme_type;
 			}
+			//default to cenc for smooth
+			else if (traf->trex->track->moov->mov->is_smooth)
+				saiz_aux_info_type = sinf_fmt = GF_ISOM_CENC_SCHEME;
 		}
 		if (!saiz_aux_info_type && (c1==1) && (c2==1)) {
 			GF_LOG(GF_LOG_WARNING, GF_LOG_CONTAINER, ("[iso file] saiz box without flags nor aux info type and no default scheme, ignoring\n"));
@@ -1458,6 +1461,9 @@ Bool gf_isom_cenc_has_saiz_saio_full(GF_SampleTableBox *stbl, void *_traf, u32 s
 			if (sinf && sinf->scheme_type) {
 				saio_aux_info_type = sinf_fmt = sinf->scheme_type->scheme_type;
 			}
+			//default to cenc for smooth
+			else if (traf->trex->track->moov->mov->is_smooth)
+				saio_aux_info_type = sinf_fmt = GF_ISOM_CENC_SCHEME;
 		}
 		if (!saio_aux_info_type && (c1==1) && (c2==1)) {
 			GF_LOG(GF_LOG_WARNING, GF_LOG_CONTAINER, ("[iso file] saio box without flags nor aux info type and no default scheme, ignoring\n"));
@@ -1670,7 +1676,7 @@ GF_Err gf_isom_cenc_get_sample_aux_info(GF_ISOFile *the_file, u32 trackNumber, u
 
 	//senc is not loaded by default, do it now
 	if (!gf_list_count(senc->samp_aux_info)) {
-		GF_Err e = senc_Parse(trak->Media->information->dataHandler->bs, trak, NULL, senc);
+		GF_Err e = senc_Parse(trak->Media->information->dataHandler->bs, trak, NULL, senc, 0);
 		if (e) return e;
 	}
 
